@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist/server",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "noEmit": false,
+    "jsx": "preserve"
+  },
+  "include": ["src/server", "src/shared", "src/db"]
+}
