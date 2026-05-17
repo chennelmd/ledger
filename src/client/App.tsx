@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { AccountsPage } from './pages/AccountsPage.js';
 import { BudgetPage } from './pages/BudgetPage.js';
+import { DashboardPage } from './pages/DashboardPage.js';
 import { LedgerPage } from './pages/LedgerPage.js';
 
-type View = 'accounts' | 'budget' | 'ledger';
+type View = 'dashboard' | 'accounts' | 'budget' | 'ledger';
 
 const NAV: { id: View; label: string }[] = [
+  { id: 'dashboard', label: 'Dashboard' },
   { id: 'accounts', label: 'Accounts' },
   { id: 'budget',   label: 'Budget' },
   { id: 'ledger',   label: 'Ledger' },
@@ -80,6 +82,7 @@ export function App() {
 
       {/* Page content */}
       <main style={{ paddingTop: 32 }}>
+        {view === 'dashboard' && <DashboardPage />}
         {view === 'accounts' && <AccountsPage onNavigateToLedger={navigateToLedger} />}
         {view === 'budget'   && <BudgetPage />}
         {view === 'ledger'   && <LedgerPage initialAccountId={ledgerAccountId} />}
