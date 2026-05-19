@@ -294,23 +294,15 @@ transactionsRouter.patch('/:id', async (c) => {
         }).run();
       }
     } else if (categoryId !== undefined || txnFields.amountCents !== undefined) {
-      // Single-split sync
-      const existingSplit = tx
-        .select()
-        .from(schema.transactionSplits)
+      // Single-split sync. Replace existing category splits so reducing a
+      // multi-split transaction back to one row removes the old extra rows.
+      tx.delete(schema.transactionSplits)
         .where(and(
           eq(schema.transactionSplits.transactionId, id),
           isNull(schema.transactionSplits.transferAccountId),
-        ))
-        .get();
+        )).run();
 
-      const splitSet: Record<string, unknown> = {};
-      if (categoryId !== undefined) splitSet.categoryId = categoryId || null;
-      if (txnFields.amountCents !== undefined) splitSet.amountCents = txnFields.amountCents;
-
-      if (existingSplit) {
-        tx.update(schema.transactionSplits).set(splitSet).where(eq(schema.transactionSplits.id, existingSplit.id)).run();
-      } else if (categoryId) {
+      if (categoryId) {
         tx.insert(schema.transactionSplits).values({
           id: nanoid(),
           transactionId: id,
