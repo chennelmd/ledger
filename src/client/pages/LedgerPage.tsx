@@ -25,6 +25,7 @@ interface TxnRow {
 
 interface CategoryItem { id: string; name: string; }
 interface CategoryGroup { id: string; name: string; categories: CategoryItem[]; }
+type AccountRow = Account & { balanceCents: number };
 
 interface EditForm {
   date: string;
@@ -37,7 +38,7 @@ interface EditForm {
 
 // ─── api ─────────────────────────────────────────────────────────────────────
 
-async function fetchAccounts(): Promise<Account[]> {
+async function fetchAccounts(): Promise<AccountRow[]> {
   const res = await fetch('/api/accounts');
   if (!res.ok) throw new Error('failed to fetch accounts');
   return res.json();
@@ -393,8 +394,10 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
               <th style={S.th}>Date</th>
               <th style={S.th}>Account</th>
               <th style={S.th}>Payee</th>
+              <th style={S.th}>Notes</th>
               <th style={S.th}>Category</th>
               <th style={{ ...S.th, ...S.thRight }}>Amount</th>
+              <th style={{ ...S.th, ...S.thRight }}>Balance</th>
               <th style={{ ...S.th, textAlign: 'center' }}>✓</th>
               <th style={{ ...S.th, width: 64 }}></th>
             </tr>
@@ -409,6 +412,9 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                 groupMap.get(t.id)!.push(t);
               }
 
+              const runningBalanceByAccount = new Map(
+                (accounts ?? []).map((account) => [account.id, account.balanceCents]),
+              );
               const monoInput = { ...S.cellInput, textAlign: 'right' as const, fontFamily: "'JetBrains Mono', monospace" };
               const catSelect = (
                 value: string,
@@ -445,6 +451,10 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                 const isEditing = editingId === first.id;
                 const isTransfer = !!first.transferAccountName;
                 const isMultiSplit = rows.length > 1;
+                const balanceAfterCents = runningBalanceByAccount.get(first.accountId);
+                if (balanceAfterCents !== undefined) {
+                  runningBalanceByAccount.set(first.accountId, balanceAfterCents - first.amountCents);
+                }
 
                 // ── Edit mode ──────────────────────────────────────────────────
                 if (isEditing && editForm) {
@@ -479,34 +489,39 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                       </td>
                       <td style={S.td}>
                         {isTransfer ? (
-                          <div>
-                            <div style={{ color: '#78716C' }}>Transfer: {first.transferAccountName}</div>
-                            <input
-                              style={{ ...S.cellInput, marginTop: 6 }}
-                              type="text"
-                              value={editForm.notes}
-                              onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
-                              placeholder="Notes"
-                            />
-                          </div>
+                          <span style={{ color: '#78716C' }}>Transfer: {first.transferAccountName}</span>
                         ) : (
-                          <div>
-                            <input
-                              style={S.cellInput}
-                              type="text"
-                              value={editForm.payeeName}
-                              onChange={(e) => setEditForm({ ...editForm, payeeName: e.target.value })}
-                              placeholder="Payee"
-                            />
+                          <input
+                            style={S.cellInput}
+                            type="text"
+                            value={editForm.payeeName}
+                            onChange={(e) => setEditForm({ ...editForm, payeeName: e.target.value })}
+                            placeholder="Payee"
+                          />
+                        )}
+                      </td>
+                      <td style={S.td}>
+                        <div>
+                          <input
+                            style={S.cellInput}
+                            type="text"
+                            value={editForm.notes}
+                            onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                            placeholder="Notes"
+                          />
+                          {!isTransfer && editForm.splits.length > 1 && (
                             <input
                               style={{ ...S.cellInput, marginTop: 6 }}
                               type="text"
-                              value={editForm.notes}
-                              onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
-                              placeholder="Notes"
+                              value={split0?.notes ?? ''}
+                              onChange={(e) => {
+                                const next = editForm.splits.map((s, i) => i === 0 ? { ...s, notes: e.target.value } : s);
+                                setEditForm({ ...editForm, splits: next });
+                              }}
+                              placeholder="Split note"
                             />
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </td>
                       <td style={S.td}>
                         {isTransfer ? (
@@ -522,18 +537,6 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                                 splits: [...editForm.splits, { categoryId: '', amount: '', notes: '' }],
                               });
                             })}
-                            {editForm.splits.length > 1 && (
-                              <input
-                                style={{ ...S.cellInput, marginTop: 6 }}
-                                type="text"
-                                value={split0?.notes ?? ''}
-                                onChange={(e) => {
-                                  const next = editForm.splits.map((s, i) => i === 0 ? { ...s, notes: e.target.value } : s);
-                                  setEditForm({ ...editForm, splits: next });
-                                }}
-                                placeholder="Split note"
-                              />
-                            )}
                           </div>
                         )}
                       </td>
@@ -561,6 +564,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                           />
                         )}
                       </td>
+                      <td style={{ ...S.td, ...S.tdMono, color: '#A8A29E' }}>—</td>
                       <td style={{ ...S.td, textAlign: 'center' }}>
                         <input
                           type="checkbox"
@@ -588,23 +592,23 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                       <tr key={`${first.id}|edit|${idx}`} style={S.editRow}>
                         <td style={S.td} /><td style={S.td} /><td style={S.td} />
                         <td style={S.td}>
+                          <input
+                            style={S.cellInput}
+                            type="text"
+                            value={splitEntry?.notes ?? ''}
+                            onChange={(e) => {
+                              const next = editForm.splits.map((s, j) => j === idx ? { ...s, notes: e.target.value } : s);
+                              setEditForm({ ...editForm, splits: next });
+                            }}
+                            placeholder="Split note"
+                          />
+                        </td>
+                        <td style={S.td}>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 24px', gap: 6, alignItems: 'center' }}>
-                            <div>
-                              {catSelect(splitEntry?.categoryId ?? '', (v) => {
-                                const next = editForm.splits.map((s, j) => j === idx ? { ...s, categoryId: v } : s);
-                                setEditForm({ ...editForm, splits: next });
-                              })}
-                              <input
-                                style={{ ...S.cellInput, marginTop: 6 }}
-                                type="text"
-                                value={splitEntry?.notes ?? ''}
-                                onChange={(e) => {
-                                  const next = editForm.splits.map((s, j) => j === idx ? { ...s, notes: e.target.value } : s);
-                                  setEditForm({ ...editForm, splits: next });
-                                }}
-                                placeholder="Split note"
-                              />
-                            </div>
+                            {catSelect(splitEntry?.categoryId ?? '', (v) => {
+                              const next = editForm.splits.map((s, j) => j === idx ? { ...s, categoryId: v } : s);
+                              setEditForm({ ...editForm, splits: next });
+                            })}
                             <button
                               type="button"
                               style={S.iconBtnDanger}
@@ -630,7 +634,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                             }}
                           />
                         </td>
-                        <td style={S.td} /><td style={S.td} />
+                        <td style={S.td} /><td style={S.td} /><td style={S.td} />
                       </tr>
                     );
                   }
@@ -650,12 +654,10 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                       <td style={S.td}>{fmtDate(first.date)}</td>
                       <td style={{ ...S.td, color: '#78716C', fontSize: 12.5 }}>{first.accountName ?? '—'}</td>
                       <td style={S.td}>
-                        <div>{first.payeeName ?? <span style={S.tdMuted}>—</span>}</div>
-                        {first.notes && (
-                          <div style={{ color: '#78716C', fontSize: 11.5, marginTop: 3 }}>
-                            {first.notes}
-                          </div>
-                        )}
+                        {first.payeeName ?? <span style={S.tdMuted}>—</span>}
+                      </td>
+                      <td style={{ ...S.td, color: first.notes ? '#78716C' : '#A8A29E', fontSize: 12.5 }}>
+                        {first.notes ?? '—'}
                       </td>
                       <td style={S.td}>
                         <button
@@ -694,6 +696,9 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                       }}>
                         {fmt$(first.amountCents)}
                       </td>
+                      <td style={{ ...S.td, ...S.tdMono, color: '#78716C' }}>
+                        {balanceAfterCents === undefined ? '—' : fmt$(balanceAfterCents)}
+                      </td>
                       <td style={{ ...S.td, textAlign: 'center' }}>
                         <input
                           type="checkbox"
@@ -718,20 +723,18 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                     elems.push(
                       <tr key={`${row.id}|${row.categoryId ?? ''}`} style={{ background: '#FEFAF4' }}>
                         <td style={S.td} /><td style={S.td} /><td style={S.td} />
+                        <td style={{ ...S.td, color: row.splitNotes ? '#A8A29E' : '#C5BDB5', fontSize: 11.5 }}>
+                          {row.splitNotes ?? '—'}
+                        </td>
                         <td style={{ ...S.td, paddingLeft: 24 }}>
                           <span style={{ color: '#78716C', fontSize: 12.5 }}>
                             ↳ {row.categoryName ?? <em style={{ color: '#A8A29E' }}>Uncategorized</em>}
                           </span>
-                          {row.splitNotes && (
-                            <span style={{ color: '#A8A29E', fontSize: 11.5, marginLeft: 8 }}>
-                              {row.splitNotes}
-                            </span>
-                          )}
                         </td>
                         <td style={{ ...S.td, ...S.tdMono, color: '#78716C', fontSize: 12.5 }}>
                           {fmt$(row.splitAmountCents ?? 0)}
                         </td>
-                        <td style={S.td} /><td style={S.td} />
+                        <td style={S.td} /><td style={S.td} /><td style={S.td} />
                       </tr>
                     );
                   }
@@ -746,16 +749,12 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                     <td style={S.td}>{fmtDate(first.date)}</td>
                     <td style={{ ...S.td, color: '#78716C', fontSize: 12.5 }}>{first.accountName ?? '—'}</td>
                     <td style={S.td}>
-                      <div>
-                        {isTransfer
-                          ? <span style={{ color: '#78716C' }}>Transfer: {first.transferAccountName}</span>
-                          : first.payeeName ?? <span style={S.tdMuted}>—</span>}
-                      </div>
-                      {first.notes && (
-                        <div style={{ color: '#78716C', fontSize: 11.5, marginTop: 3 }}>
-                          {first.notes}
-                        </div>
-                      )}
+                      {isTransfer
+                        ? <span style={{ color: '#78716C' }}>Transfer: {first.transferAccountName}</span>
+                        : first.payeeName ?? <span style={S.tdMuted}>—</span>}
+                    </td>
+                    <td style={{ ...S.td, color: first.notes ? '#78716C' : '#A8A29E', fontSize: 12.5 }}>
+                      {first.notes ?? '—'}
                     </td>
                     <td style={S.td}>
                       {isTransfer
@@ -767,6 +766,9 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                       ...(displayCents >= 0 ? S.amtPositive : S.amtNegative),
                     }}>
                       {fmt$(displayCents)}
+                    </td>
+                    <td style={{ ...S.td, ...S.tdMono, color: '#78716C' }}>
+                      {balanceAfterCents === undefined ? '—' : fmt$(balanceAfterCents)}
                     </td>
                     <td style={{ ...S.td, textAlign: 'center' }}>
                       <input

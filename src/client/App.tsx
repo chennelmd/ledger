@@ -24,7 +24,7 @@ export function App() {
     setView('ledger');
   }
 
-  const pageMaxWidth = view === 'budget' ? 1180 : 900;
+  const pageMaxWidth = view === 'budget' || view === 'ledger' ? 1180 : 900;
 
   return (
     <div style={{ maxWidth: pageMaxWidth, margin: '0 auto', padding: '48px 24px 80px' }}>
