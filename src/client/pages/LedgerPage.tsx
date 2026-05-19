@@ -28,6 +28,7 @@ interface CategoryGroup { id: string; name: string; categories: CategoryItem[]; 
 interface EditForm {
   date: string;
   payeeName: string;
+  notes: string;
   splits: Array<{ categoryId: string; amount: string }>;
   amount: string; // used for transfer edits only
   accountId: string;
@@ -286,6 +287,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       setEditForm({
         date: t.date,
         payeeName: '',
+        notes: t.notes ?? '',
         splits: [],
         amount: (Math.abs(t.amountCents) / 100).toFixed(2),
         accountId: t.accountId,
@@ -295,6 +297,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       setEditForm({
         date: t.date,
         payeeName: t.payeeName ?? '',
+        notes: t.notes ?? '',
         splits: allSplitRows.map(r => ({
           categoryId: r.categoryId ?? '',
           amount: ((r.splitAmountCents ?? r.amountCents) / 100).toFixed(2),
@@ -311,6 +314,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       const body: Record<string, unknown> = {
         date: editForm.date,
         amountCents: Math.round(parseFloat(editForm.amount) * 100),
+        notes: editForm.notes.trim() || null,
       };
       editMutation.mutate({ id: t.transferId, body, isTransfer: true });
     } else {
@@ -323,6 +327,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
         date: editForm.date,
         amountCents: totalCents,
         accountId: editForm.accountId,
+        notes: editForm.notes.trim() || null,
       };
       if (editForm.payeeName.trim()) body.payeeName = editForm.payeeName.trim();
       if (parsedSplits.length > 1) {
@@ -449,15 +454,33 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                       </td>
                       <td style={S.td}>
                         {isTransfer ? (
-                          <span style={{ color: '#78716C' }}>Transfer: {first.transferAccountName}</span>
+                          <div>
+                            <div style={{ color: '#78716C' }}>Transfer: {first.transferAccountName}</div>
+                            <input
+                              style={{ ...S.cellInput, marginTop: 6 }}
+                              type="text"
+                              value={editForm.notes}
+                              onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                              placeholder="Notes"
+                            />
+                          </div>
                         ) : (
-                          <input
-                            style={S.cellInput}
-                            type="text"
-                            value={editForm.payeeName}
-                            onChange={(e) => setEditForm({ ...editForm, payeeName: e.target.value })}
-                            placeholder="Payee"
-                          />
+                          <div>
+                            <input
+                              style={S.cellInput}
+                              type="text"
+                              value={editForm.payeeName}
+                              onChange={(e) => setEditForm({ ...editForm, payeeName: e.target.value })}
+                              placeholder="Payee"
+                            />
+                            <input
+                              style={{ ...S.cellInput, marginTop: 6 }}
+                              type="text"
+                              value={editForm.notes}
+                              onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                              placeholder="Notes"
+                            />
+                          </div>
                         )}
                       </td>
                       <td style={S.td}>
@@ -509,22 +532,46 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         <button style={S.cancelBtn} onClick={() => { setEditingId(null); setEditForm(null); }}>
                           ✕
                         </button>
+                        {!isTransfer && (
+                          <button
+                            style={{ ...S.cancelBtn, marginLeft: 4 }}
+                            onClick={() => setEditForm({
+                              ...editForm,
+                              splits: [...editForm.splits, { categoryId: '', amount: '' }],
+                            })}
+                          >
+                            Split
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
 
                   // Additional split edit rows (index 1+)
-                  for (let i = 1; i < rows.length; i++) {
+                  for (let i = 1; i < editForm.splits.length; i++) {
                     const idx = i;
                     const splitEntry = editForm.splits[idx];
                     elems.push(
                       <tr key={`${first.id}|edit|${idx}`} style={S.editRow}>
                         <td style={S.td} /><td style={S.td} /><td style={S.td} />
                         <td style={S.td}>
-                          {catSelect(splitEntry?.categoryId ?? '', (v) => {
-                            const next = editForm.splits.map((s, j) => j === idx ? { ...s, categoryId: v } : s);
-                            setEditForm({ ...editForm, splits: next });
-                          })}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 24px', gap: 6, alignItems: 'center' }}>
+                            {catSelect(splitEntry?.categoryId ?? '', (v) => {
+                              const next = editForm.splits.map((s, j) => j === idx ? { ...s, categoryId: v } : s);
+                              setEditForm({ ...editForm, splits: next });
+                            })}
+                            <button
+                              type="button"
+                              style={S.iconBtnDanger}
+                              onClick={() => setEditForm({
+                                ...editForm,
+                                splits: editForm.splits.filter((_, j) => j !== idx),
+                              })}
+                              aria-label="Remove split"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
                         </td>
                         <td style={{ ...S.td, ...S.tdMono }}>
                           <input
@@ -557,7 +604,14 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                     <tr key={first.id}>
                       <td style={S.td}>{fmtDate(first.date)}</td>
                       <td style={{ ...S.td, color: '#78716C', fontSize: 12.5 }}>{first.accountName ?? '—'}</td>
-                      <td style={S.td}>{first.payeeName ?? <span style={S.tdMuted}>—</span>}</td>
+                      <td style={S.td}>
+                        <div>{first.payeeName ?? <span style={S.tdMuted}>—</span>}</div>
+                        {first.notes && (
+                          <div style={{ color: '#78716C', fontSize: 11.5, marginTop: 3 }}>
+                            {first.notes}
+                          </div>
+                        )}
+                      </td>
                       <td style={S.td}>
                         <button
                           onClick={() => toggleSplit(first.id)}
@@ -642,9 +696,16 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                     <td style={S.td}>{fmtDate(first.date)}</td>
                     <td style={{ ...S.td, color: '#78716C', fontSize: 12.5 }}>{first.accountName ?? '—'}</td>
                     <td style={S.td}>
-                      {isTransfer
-                        ? <span style={{ color: '#78716C' }}>Transfer: {first.transferAccountName}</span>
-                        : first.payeeName ?? <span style={S.tdMuted}>—</span>}
+                      <div>
+                        {isTransfer
+                          ? <span style={{ color: '#78716C' }}>Transfer: {first.transferAccountName}</span>
+                          : first.payeeName ?? <span style={S.tdMuted}>—</span>}
+                      </div>
+                      {first.notes && (
+                        <div style={{ color: '#78716C', fontSize: 11.5, marginTop: 3 }}>
+                          {first.notes}
+                        </div>
+                      )}
                     </td>
                     <td style={S.td}>
                       {isTransfer

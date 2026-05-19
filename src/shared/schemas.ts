@@ -122,6 +122,7 @@ export type NewTransferInput = z.infer<typeof NewTransferSchema>;
 export const TransferUpdateSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   amountCents: z.number().int().positive().optional(),
+  notes: z.string().nullable().optional(),
 });
 
 export type TransferUpdateInput = z.infer<typeof TransferUpdateSchema>;

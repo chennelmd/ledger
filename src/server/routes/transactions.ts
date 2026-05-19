@@ -199,7 +199,7 @@ transactionsRouter.patch('/transfer/:transferId', async (c) => {
   const parsed = TransferUpdateSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
 
-  const { date, amountCents } = parsed.data;
+  const { date, amountCents, notes } = parsed.data;
   const now = new Date().toISOString();
 
   const result = db.transaction((tx) => {
@@ -214,6 +214,7 @@ transactionsRouter.patch('/transfer/:transferId', async (c) => {
     for (const leg of legs) {
       const setFields: Record<string, unknown> = { updatedAt: now };
       if (date) setFields.date = date;
+      if (notes !== undefined) setFields.notes = notes;
       if (amountCents !== undefined) {
         // Preserve sign: the outgoing leg is negative, incoming is positive
         setFields.amountCents = leg.amountCents < 0 ? -amountCents : amountCents;
