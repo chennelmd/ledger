@@ -697,7 +697,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         {fmt$(first.amountCents)}
                       </td>
                       <td style={{ ...S.td, ...S.tdMono, color: '#78716C' }}>
-                        {balanceAfterCents === undefined ? '—' : fmt$(balanceAfterCents)}
+                        {!accountId || balanceAfterCents === undefined ? '—' : fmt$(balanceAfterCents)}
                       </td>
                       <td style={{ ...S.td, textAlign: 'center' }}>
                         <input
@@ -768,7 +768,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                       {fmt$(displayCents)}
                     </td>
                     <td style={{ ...S.td, ...S.tdMono, color: '#78716C' }}>
-                      {balanceAfterCents === undefined ? '—' : fmt$(balanceAfterCents)}
+                      {!accountId || balanceAfterCents === undefined ? '—' : fmt$(balanceAfterCents)}
                     </td>
                     <td style={{ ...S.td, textAlign: 'center' }}>
                       <input
