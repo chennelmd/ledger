@@ -510,9 +510,16 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                             placeholder="Notes"
                           />
                         ) : (
-                          <>
+                          <div>
                             <input
                               style={S.cellInput}
+                              type="text"
+                              value={editForm.notes}
+                              onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                              placeholder="Transaction note"
+                            />
+                            <input
+                              style={{ ...S.cellInput, marginTop: 6 }}
                               type="text"
                               value={split0?.notes ?? ''}
                               onChange={(e) => {
@@ -521,7 +528,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                               }}
                               placeholder="Split note"
                             />
-                          </>
+                          </div>
                         )}
                       </td>
                       <td style={S.td}>
