@@ -501,7 +501,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         )}
                       </td>
                       <td style={S.td}>
-                        <div>
+                        {isTransfer || editForm.splits.length === 1 ? (
                           <input
                             style={S.cellInput}
                             type="text"
@@ -509,9 +509,10 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                             onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
                             placeholder="Notes"
                           />
-                          {!isTransfer && editForm.splits.length > 1 && (
+                        ) : (
+                          <>
                             <input
-                              style={{ ...S.cellInput, marginTop: 6 }}
+                              style={S.cellInput}
                               type="text"
                               value={split0?.notes ?? ''}
                               onChange={(e) => {
@@ -520,8 +521,8 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                               }}
                               placeholder="Split note"
                             />
-                          )}
-                        </div>
+                          </>
+                        )}
                       </td>
                       <td style={S.td}>
                         {isTransfer ? (
@@ -720,14 +721,11 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
 
                   // One sub-row per split — hidden when collapsed
                   if (!collapsed) for (const row of rows) {
-                    const splitName = row.categoryName ?? 'Uncategorized';
                     elems.push(
                       <tr key={`${row.id}|${row.categoryId ?? ''}`} style={{ background: '#FEFAF4' }}>
                         <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
                         <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
-                        <td style={{ ...S.td, color: '#78716C', fontSize: 12.5, paddingLeft: 24 }}>
-                          → {splitName}
-                        </td>
+                        <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
                         <td style={{ ...S.td, color: row.splitNotes ? '#A8A29E' : '#C5BDB5', fontSize: 11.5 }}>
                           {row.splitNotes ?? '—'}
                         </td>
