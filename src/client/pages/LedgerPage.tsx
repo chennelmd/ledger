@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Pencil, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, ListPlus, Pencil, Trash2 } from 'lucide-react';
 import type { Account } from '../../db/schema.js';
 import { AddTransactionModal } from '../components/AddTransactionModal.js';
 
@@ -281,7 +281,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
     return () => window.removeEventListener('keydown', h);
   }, []);
 
-  function startEdit(t: TxnRow) {
+  function startEdit(t: TxnRow, addBlankSplit = false) {
     setEditingId(t.id);
     if (t.transferId) {
       setEditForm({
@@ -294,14 +294,15 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       });
     } else {
       const allSplitRows = txns!.filter(r => r.id === t.id);
+      const splits = allSplitRows.map(r => ({
+        categoryId: r.categoryId ?? '',
+        amount: ((r.splitAmountCents ?? r.amountCents) / 100).toFixed(2),
+      }));
       setEditForm({
         date: t.date,
         payeeName: t.payeeName ?? '',
         notes: t.notes ?? '',
-        splits: allSplitRows.map(r => ({
-          categoryId: r.categoryId ?? '',
-          amount: ((r.splitAmountCents ?? r.amountCents) / 100).toFixed(2),
-        })),
+        splits: addBlankSplit ? [...splits, { categoryId: '', amount: '' }] : splits,
         amount: '',
         accountId: t.accountId,
       });
@@ -318,11 +319,14 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       };
       editMutation.mutate({ id: t.transferId, body, isTransfer: true });
     } else {
-      const parsedSplits = editForm.splits.map(s => ({
-        amountCents: Math.round(parseFloat(s.amount || '0') * 100),
-        categoryId: s.categoryId || null,
-      }));
+      const parsedSplits = editForm.splits
+        .map(s => ({
+          amountCents: Math.round(parseFloat(s.amount || '0') * 100),
+          categoryId: s.categoryId || null,
+        }))
+        .filter(s => s.amountCents !== 0 || s.categoryId);
       const totalCents = parsedSplits.reduce((sum, s) => sum + s.amountCents, 0);
+      if (parsedSplits.length === 0) return;
       const body: Record<string, unknown> = {
         date: editForm.date,
         amountCents: totalCents,
@@ -386,7 +390,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
               <th style={S.th}>Category</th>
               <th style={{ ...S.th, ...S.thRight }}>Amount</th>
               <th style={{ ...S.th, textAlign: 'center' }}>✓</th>
-              <th style={{ ...S.th, width: 64 }}></th>
+              <th style={{ ...S.th, width: 92 }}></th>
             </tr>
           </thead>
           <tbody>
@@ -661,6 +665,9 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         <button style={S.iconBtn} onClick={() => startEdit(first)} aria-label="Edit">
                           <Pencil size={13} />
                         </button>
+                        <button style={S.iconBtn} onClick={() => startEdit(first, true)} aria-label="Add split">
+                          <ListPlus size={13} />
+                        </button>
                         <button style={S.iconBtnDanger} onClick={() => handleDelete(first.id)} aria-label="Delete">
                           <Trash2 size={13} />
                         </button>
@@ -730,6 +737,11 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                       <button style={S.iconBtn} onClick={() => startEdit(first)} aria-label="Edit">
                         <Pencil size={13} />
                       </button>
+                      {!isTransfer && (
+                        <button style={S.iconBtn} onClick={() => startEdit(first, true)} aria-label="Add split">
+                          <ListPlus size={13} />
+                        </button>
+                      )}
                       <button style={S.iconBtnDanger} onClick={() => handleDelete(first.id)} aria-label="Delete">
                         <Trash2 size={13} />
                       </button>
