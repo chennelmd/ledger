@@ -459,11 +459,17 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                 // ── Edit mode ──────────────────────────────────────────────────
                 if (isEditing && editForm) {
                   const elems: React.ReactElement[] = [];
+                  const editIsSplit = !isTransfer && editForm.splits.length > 1;
+                  const editSign = first.amountCents < 0 || (first.amountCents === 0 && (first.splitAmountCents ?? 0) < 0) ? -1 : 1;
+                  const editTotalCents = editSign * editForm.splits.reduce(
+                    (sum, split) => sum + Math.round(Math.abs(parseFloat(split.amount || '0')) * 100),
+                    0,
+                  );
 
                   // Primary edit row
                   const split0 = editForm.splits[0];
                   elems.push(
-                    <tr key={`${first.id}|edit|0`} style={S.editRow}>
+                    <tr key={`${first.id}|edit|summary`} style={S.editRow}>
                       <td style={S.td}>
                         <input
                           style={S.cellInput}
@@ -501,39 +507,28 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         )}
                       </td>
                       <td style={S.td}>
-                        {isTransfer || editForm.splits.length === 1 ? (
-                          <input
-                            style={S.cellInput}
-                            type="text"
-                            value={editForm.notes}
-                            onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
-                            placeholder="Notes"
-                          />
-                        ) : (
-                          <div>
-                            <input
-                              style={S.cellInput}
-                              type="text"
-                              value={editForm.notes}
-                              onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
-                              placeholder="Transaction note"
-                            />
-                            <input
-                              style={{ ...S.cellInput, marginTop: 6 }}
-                              type="text"
-                              value={split0?.notes ?? ''}
-                              onChange={(e) => {
-                                const next = editForm.splits.map((s, i) => i === 0 ? { ...s, notes: e.target.value } : s);
-                                setEditForm({ ...editForm, splits: next });
-                              }}
-                              placeholder="Split note"
-                            />
-                          </div>
-                        )}
+                        <input
+                          style={S.cellInput}
+                          type="text"
+                          value={editForm.notes}
+                          onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                          placeholder="Notes"
+                        />
                       </td>
                       <td style={S.td}>
                         {isTransfer ? (
                           <span style={S.tdMuted}>—</span>
+                        ) : editIsSplit ? (
+                          <span style={{
+                            display: 'inline-block',
+                            fontSize: 10.5,
+                            fontWeight: 600,
+                            letterSpacing: '0.08em',
+                            textTransform: 'uppercase',
+                            color: '#78716C',
+                            background: '#EDE8DF',
+                            padding: '2px 6px',
+                          }}>Split</span>
                         ) : (
                           <div>
                             {catSelect(split0?.categoryId ?? '', (v) => {
@@ -558,6 +553,10 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                             onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })}
                             onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(first); }}
                           />
+                        ) : editIsSplit ? (
+                          <span style={editTotalCents >= 0 ? S.amtPositive : S.amtNegative}>
+                            {fmt$(editTotalCents)}
+                          </span>
                         ) : (
                           <input
                             style={monoInput}
@@ -592,13 +591,15 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                     </tr>
                   );
 
-                  // Additional split edit rows (index 1+)
-                  for (let i = 1; i < editForm.splits.length; i++) {
+                  // Split edit rows mirror saved split rows.
+                  for (let i = editIsSplit ? 0 : 1; i < editForm.splits.length; i++) {
                     const idx = i;
                     const splitEntry = editForm.splits[idx];
                     elems.push(
                       <tr key={`${first.id}|edit|${idx}`} style={S.editRow}>
-                        <td style={S.td} /><td style={S.td} /><td style={S.td} />
+                        <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
+                        <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
+                        <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
                         <td style={S.td}>
                           <input
                             style={S.cellInput}
