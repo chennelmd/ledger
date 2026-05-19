@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, ListPlus, Pencil, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import type { Account } from '../../db/schema.js';
 import { AddTransactionModal } from '../components/AddTransactionModal.js';
 
@@ -90,6 +90,8 @@ const fmtDate = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
+
+const SPLIT_OPTION = '__split_transaction__';
 
 // ─── styles ──────────────────────────────────────────────────────────────────
 
@@ -281,7 +283,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
     return () => window.removeEventListener('keydown', h);
   }, []);
 
-  function startEdit(t: TxnRow, addBlankSplit = false) {
+  function startEdit(t: TxnRow) {
     setEditingId(t.id);
     if (t.transferId) {
       setEditForm({
@@ -302,7 +304,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
         date: t.date,
         payeeName: t.payeeName ?? '',
         notes: t.notes ?? '',
-        splits: addBlankSplit ? [...splits, { categoryId: '', amount: '' }] : splits,
+        splits,
         amount: '',
         accountId: t.accountId,
       });
@@ -390,7 +392,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
               <th style={S.th}>Category</th>
               <th style={{ ...S.th, ...S.thRight }}>Amount</th>
               <th style={{ ...S.th, textAlign: 'center' }}>✓</th>
-              <th style={{ ...S.th, width: 92 }}></th>
+              <th style={{ ...S.th, width: 64 }}></th>
             </tr>
           </thead>
           <tbody>
@@ -404,9 +406,24 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
               }
 
               const monoInput = { ...S.cellInput, textAlign: 'right' as const, fontFamily: "'JetBrains Mono', monospace" };
-              const catSelect = (value: string, onChange: (v: string) => void) => (
-                <select style={S.cellSelect} value={value} onChange={(e) => onChange(e.target.value)}>
+              const catSelect = (
+                value: string,
+                onChange: (v: string) => void,
+                onSplit?: () => void,
+              ) => (
+                <select
+                  style={S.cellSelect}
+                  value={value}
+                  onChange={(e) => {
+                    if (e.target.value === SPLIT_OPTION) {
+                      onSplit?.();
+                      return;
+                    }
+                    onChange(e.target.value);
+                  }}
+                >
                   <option value="">— none —</option>
+                  {onSplit && <option value={SPLIT_OPTION}>Split transaction</option>}
                   {groups?.map((g) =>
                     g.categories.length > 0 ? (
                       <optgroup key={g.id} label={g.name}>
@@ -494,6 +511,11 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                           catSelect(split0?.categoryId ?? '', (v) => {
                             const next = editForm.splits.map((s, i) => i === 0 ? { ...s, categoryId: v } : s);
                             setEditForm({ ...editForm, splits: next });
+                          }, () => {
+                            setEditForm({
+                              ...editForm,
+                              splits: [...editForm.splits, { categoryId: '', amount: '' }],
+                            });
                           })
                         )}
                       </td>
@@ -536,17 +558,6 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         <button style={S.cancelBtn} onClick={() => { setEditingId(null); setEditForm(null); }}>
                           ✕
                         </button>
-                        {!isTransfer && (
-                          <button
-                            style={{ ...S.cancelBtn, marginLeft: 4 }}
-                            onClick={() => setEditForm({
-                              ...editForm,
-                              splits: [...editForm.splits, { categoryId: '', amount: '' }],
-                            })}
-                          >
-                            Split
-                          </button>
-                        )}
                       </td>
                     </tr>
                   );
@@ -665,9 +676,6 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         <button style={S.iconBtn} onClick={() => startEdit(first)} aria-label="Edit">
                           <Pencil size={13} />
                         </button>
-                        <button style={S.iconBtn} onClick={() => startEdit(first, true)} aria-label="Add split">
-                          <ListPlus size={13} />
-                        </button>
                         <button style={S.iconBtnDanger} onClick={() => handleDelete(first.id)} aria-label="Delete">
                           <Trash2 size={13} />
                         </button>
@@ -737,11 +745,6 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                       <button style={S.iconBtn} onClick={() => startEdit(first)} aria-label="Edit">
                         <Pencil size={13} />
                       </button>
-                      {!isTransfer && (
-                        <button style={S.iconBtn} onClick={() => startEdit(first, true)} aria-label="Add split">
-                          <ListPlus size={13} />
-                        </button>
-                      )}
                       <button style={S.iconBtnDanger} onClick={() => handleDelete(first.id)} aria-label="Delete">
                         <Trash2 size={13} />
                       </button>
