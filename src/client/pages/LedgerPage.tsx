@@ -720,15 +720,20 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
 
                   // One sub-row per split — hidden when collapsed
                   if (!collapsed) for (const row of rows) {
+                    const splitName = row.categoryName ?? 'Uncategorized';
                     elems.push(
                       <tr key={`${row.id}|${row.categoryId ?? ''}`} style={{ background: '#FEFAF4' }}>
-                        <td style={S.td} /><td style={S.td} /><td style={S.td} />
+                        <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
+                        <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
+                        <td style={{ ...S.td, color: '#78716C', fontSize: 12.5, paddingLeft: 24 }}>
+                          → {splitName}
+                        </td>
                         <td style={{ ...S.td, color: row.splitNotes ? '#A8A29E' : '#C5BDB5', fontSize: 11.5 }}>
                           {row.splitNotes ?? '—'}
                         </td>
-                        <td style={{ ...S.td, paddingLeft: 24 }}>
+                        <td style={S.td}>
                           <span style={{ color: '#78716C', fontSize: 12.5 }}>
-                            ↳ {row.categoryName ?? <em style={{ color: '#A8A29E' }}>Uncategorized</em>}
+                            {row.categoryName ?? <em style={{ color: '#A8A29E' }}>Uncategorized</em>}
                           </span>
                         </td>
                         <td style={{ ...S.td, ...S.tdMono, color: '#78716C', fontSize: 12.5 }}>
