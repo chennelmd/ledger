@@ -324,6 +324,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       };
       editMutation.mutate({ id: t.transferId, body, isTransfer: true });
     } else {
+      const wasSplit = (txns?.filter(r => r.id === t.id).length ?? 0) > 1;
       const sign = t.amountCents < 0 || (t.amountCents === 0 && (t.splitAmountCents ?? 0) < 0) ? -1 : 1;
       const parsedSplits = editForm.splits
         .map(s => ({
@@ -341,7 +342,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
         notes: editForm.notes.trim() || null,
       };
       if (editForm.payeeName.trim()) body.payeeName = editForm.payeeName.trim();
-      if (parsedSplits.length > 1) {
+      if (parsedSplits.length > 1 || wasSplit || parsedSplits.some(s => s.notes)) {
         body.splits = parsedSplits;
       } else {
         body.categoryId = parsedSplits[0]?.categoryId ?? null;
@@ -617,6 +618,11 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                             {catSelect(splitEntry?.categoryId ?? '', (v) => {
                               const next = editForm.splits.map((s, j) => j === idx ? { ...s, categoryId: v } : s);
                               setEditForm({ ...editForm, splits: next });
+                            }, () => {
+                              setEditForm({
+                                ...editForm,
+                                splits: [...editForm.splits, { categoryId: '', amount: '', notes: '' }],
+                              });
                             })}
                             <button
                               type="button"
