@@ -3,14 +3,16 @@ import { AccountsPage } from './pages/AccountsPage.js';
 import { BudgetPage } from './pages/BudgetPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { LedgerPage } from './pages/LedgerPage.js';
+import { SchedulesPage } from './pages/SchedulesPage.js';
 
-type View = 'dashboard' | 'accounts' | 'budget' | 'ledger';
+type View = 'dashboard' | 'accounts' | 'budget' | 'ledger' | 'schedules';
 
 const NAV: { id: View; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'accounts', label: 'Accounts' },
   { id: 'budget',   label: 'Budget' },
   { id: 'ledger',   label: 'Ledger' },
+  { id: 'schedules', label: 'Schedules' },
 ];
 
 export function App() {
@@ -22,8 +24,10 @@ export function App() {
     setView('ledger');
   }
 
+  const pageMaxWidth = view === 'budget' ? 1180 : 900;
+
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto', padding: '48px 24px 80px' }}>
+    <div style={{ maxWidth: pageMaxWidth, margin: '0 auto', padding: '48px 24px 80px' }}>
       {/* Masthead */}
       <header style={{ marginBottom: 0 }}>
         <div style={{
@@ -86,6 +90,7 @@ export function App() {
         {view === 'accounts' && <AccountsPage onNavigateToLedger={navigateToLedger} />}
         {view === 'budget'   && <BudgetPage />}
         {view === 'ledger'   && <LedgerPage initialAccountId={ledgerAccountId} />}
+        {view === 'schedules' && <SchedulesPage />}
       </main>
     </div>
   );

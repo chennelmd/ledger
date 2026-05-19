@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -112,13 +112,29 @@ async function patchCategory(id: string, patch: Record<string, unknown>) {
 
 // ─── column widths ────────────────────────────────────────────────────────────
 
-function colWidth(numMonths: number) {
-  return numMonths === 1 ? 120 : numMonths === 2 ? 108 : 88;
+function minMoneyColWidth(numMonths: number) {
+  return numMonths === 1 ? 112 : numMonths === 2 ? 96 : 78;
 }
 
-function gridTemplate(numMonths: number) {
-  const w = colWidth(numMonths);
-  return `1fr ${Array(3 * numMonths).fill(`${w}px`).join(' ')}`;
+function categoryColumnWidth(data?: BudgetMonth) {
+  const labels = data?.groups.flatMap((group) => [
+    group.name,
+    ...group.categories.map((category) => category.name),
+    'Total',
+  ]) ?? ['Total'];
+  const longest = labels.reduce((max, label) => Math.max(max, label.length), 0);
+  return Math.min(Math.max(Math.ceil(longest * 7.5) + 28, 96), 220);
+}
+
+function gridTemplate(numMonths: number, categoryWidth: number) {
+  const w = minMoneyColWidth(numMonths);
+  return `${categoryWidth}px ${Array(3 * numMonths).fill(`minmax(${w}px, 1fr)`).join(' ')}`;
+}
+
+function readStoredNumMonths(): 1 | 2 | 3 {
+  if (typeof window === 'undefined') return 1;
+  const stored = Number(window.localStorage.getItem('budget:numMonths'));
+  return stored === 2 || stored === 3 ? stored : 1;
 }
 
 // Vertical separator between month groups
@@ -166,6 +182,7 @@ const S = {
   }),
   // Group header
   groupBlock: { marginBottom: 24 },
+  groupGridWrap: { overflowX: 'visible' as const, paddingBottom: 2 },
   groupHeaderWrap: { borderBottom: '1px solid #1C1917' },
   groupNameArea: {
     display: 'flex', flexDirection: 'column' as const,
@@ -267,6 +284,13 @@ const S = {
 
 const availStyle = (cents: number): React.CSSProperties =>
   cents > 0 ? S.availablePositive : cents < 0 ? S.availableNegative : S.availableZero;
+
+const budgetGridStyle = (gridCols: string): React.CSSProperties => ({
+  display: 'grid',
+  gridTemplateColumns: gridCols,
+  minWidth: '100%',
+  width: '100%',
+});
 
 // ─── AssignedCell ─────────────────────────────────────────────────────────────
 
@@ -464,7 +488,7 @@ function GroupHeader({ group, months, gridCols }: {
 
   if (!multi) {
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: gridCols, padding: '6px 0', borderBottom: '1px solid #1C1917' }}>
+      <div style={{ ...budgetGridStyle(gridCols), padding: '6px 0', borderBottom: '1px solid #1C1917' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <EditableGroupName group={group} />
           <IncomeToggle group={group} />
@@ -479,7 +503,7 @@ function GroupHeader({ group, months, gridCols }: {
   return (
     <div style={S.groupHeaderWrap}>
       {/* Row 1: name + income | month labels (each spanning 3 cols) */}
-      <div style={{ display: 'grid', gridTemplateColumns: gridCols }}>
+      <div style={budgetGridStyle(gridCols)}>
         <div style={S.groupNameArea}>
           <EditableGroupName group={group} />
           <IncomeToggle group={group} />
@@ -498,7 +522,7 @@ function GroupHeader({ group, months, gridCols }: {
         ))}
       </div>
       {/* Row 2: empty | col sub-headers per month */}
-      <div style={{ display: 'grid', gridTemplateColumns: gridCols }}>
+      <div style={budgetGridStyle(gridCols)}>
         <div />
         {months.map((m, mi) => (
           <Fragment key={m}>
@@ -517,11 +541,14 @@ function GroupHeader({ group, months, gridCols }: {
 export function BudgetPage() {
   const qc = useQueryClient();
   const [month, setMonth] = useState(currentMonth());
-  const [numMonths, setNumMonths] = useState(1);
+  const [numMonths, setNumMonths] = useState<1 | 2 | 3>(readStoredNumMonths);
   const [newGroupName, setNewGroupName] = useState('');
 
+  useEffect(() => {
+    window.localStorage.setItem('budget:numMonths', String(numMonths));
+  }, [numMonths]);
+
   const months = Array.from({ length: numMonths }, (_, i) => shiftMonth(month, i));
-  const gridCols = gridTemplate(numMonths);
 
   const budgetResults = useQueries({
     queries: months.map((m) => ({
@@ -535,6 +562,7 @@ export function BudgetPage() {
   const isLoading = budgetResults.some((r) => r.isLoading);
   const queryError = budgetResults.find((r) => r.error)?.error;
   const ready = primaryData?.readyToAssignCents ?? 0;
+  const gridCols = gridTemplate(numMonths, categoryColumnWidth(primaryData));
 
   function getCatMonth(catId: string, mi: number): BudgetCategory | undefined {
     return allData[mi]?.groups.flatMap((g) => g.categories).find((c) => c.id === catId);
@@ -592,65 +620,68 @@ export function BudgetPage() {
 
         return (
           <div key={group.id} style={S.groupBlock}>
-            <GroupHeader group={group} months={months} gridCols={gridCols} />
+            <div style={S.groupGridWrap} data-budget-grid-wrap>
+              <GroupHeader group={group} months={months} gridCols={gridCols} />
 
-            <div style={{ border: '1px solid #E7DFD0', borderTop: 'none' }}>
-              {/* Category rows */}
-              {group.categories.map((cat) => (
-                <div
-                  key={cat.id}
-                  style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: '1px solid #F0EADD', background: '#FBF8F1', alignItems: 'center', minHeight: 42 }}
-                >
-                  <EditableCategoryName cat={cat} />
-                  {months.map((m, mi) => {
-                    const d = getCatMonth(cat.id, mi);
-                    const avail = d?.availableCents ?? 0;
-                    return (
-                      <Fragment key={m}>
-                        {/* wrapper div carries the month separator border */}
-                        <div style={mi > 0 ? MONTH_SEP : undefined}>
-                          <AssignedCell
-                            month={m} categoryId={cat.id}
-                            assignedCents={d?.assignedCents ?? 0}
-                            isIncome={group.isIncome}
-                          />
+              <div style={{ border: '1px solid #E7DFD0', borderTop: 'none', minWidth: '100%', width: '100%' }}>
+                {/* Category rows */}
+                {group.categories.map((cat) => (
+                  <div
+                    key={cat.id}
+                    style={{ ...budgetGridStyle(gridCols), borderBottom: '1px solid #F0EADD', background: '#FBF8F1', alignItems: 'center', minHeight: 42 }}
+                    data-budget-grid-row
+                  >
+                    <EditableCategoryName cat={cat} />
+                    {months.map((m, mi) => {
+                      const d = getCatMonth(cat.id, mi);
+                      const avail = d?.availableCents ?? 0;
+                      return (
+                        <Fragment key={m}>
+                          {/* wrapper div carries the month separator border */}
+                          <div style={mi > 0 ? MONTH_SEP : undefined}>
+                            <AssignedCell
+                              month={m} categoryId={cat.id}
+                              assignedCents={d?.assignedCents ?? 0}
+                              isIncome={group.isIncome}
+                            />
+                          </div>
+                          <div style={{ ...S.cellMono, ...S.activityCell }}>
+                            {(d?.activityCents ?? 0) === 0 ? '—' : fmt$(d!.activityCents)}
+                          </div>
+                          <div style={{ ...S.cellMono, ...availStyle(avail) }}>
+                            {fmt$(avail)}
+                          </div>
+                        </Fragment>
+                      );
+                    })}
+                  </div>
+                ))}
+
+                {/* Add category */}
+                <AddCategoryRow groupId={group.id} month={month} />
+
+                {/* Group totals */}
+                {group.categories.length > 0 && (
+                  <div style={{ ...budgetGridStyle(gridCols), ...S.totalsRow }}>
+                    <div style={{ ...S.catName, fontSize: 11, color: '#78716C', fontWeight: 600, letterSpacing: '0.04em', cursor: 'default' }}>
+                      Total
+                    </div>
+                    {totals.map((t, mi) => (
+                      <Fragment key={months[mi]}>
+                        <div style={{ ...S.cellMono, color: '#78716C', ...(mi > 0 ? MONTH_SEP : {}) }}>
+                          {t.assigned === 0 ? '—' : fmt$(t.assigned)}
                         </div>
-                        <div style={{ ...S.cellMono, ...S.activityCell }}>
-                          {(d?.activityCents ?? 0) === 0 ? '—' : fmt$(d!.activityCents)}
+                        <div style={{ ...S.cellMono, color: '#78716C' }}>
+                          {t.activity === 0 ? '—' : fmt$(t.activity)}
                         </div>
-                        <div style={{ ...S.cellMono, ...availStyle(avail) }}>
-                          {fmt$(avail)}
+                        <div style={{ ...S.cellMono, ...availStyle(t.available) }}>
+                          {fmt$(t.available)}
                         </div>
                       </Fragment>
-                    );
-                  })}
-                </div>
-              ))}
-
-              {/* Add category */}
-              <AddCategoryRow groupId={group.id} month={month} />
-
-              {/* Group totals */}
-              {group.categories.length > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: gridCols, ...S.totalsRow }}>
-                  <div style={{ ...S.catName, fontSize: 11, color: '#78716C', fontWeight: 600, letterSpacing: '0.04em', cursor: 'default' }}>
-                    Total
+                    ))}
                   </div>
-                  {totals.map((t, mi) => (
-                    <Fragment key={months[mi]}>
-                      <div style={{ ...S.cellMono, color: '#78716C', ...(mi > 0 ? MONTH_SEP : {}) }}>
-                        {t.assigned === 0 ? '—' : fmt$(t.assigned)}
-                      </div>
-                      <div style={{ ...S.cellMono, color: '#78716C' }}>
-                        {t.activity === 0 ? '—' : fmt$(t.activity)}
-                      </div>
-                      <div style={{ ...S.cellMono, ...availStyle(t.available) }}>
-                        {fmt$(t.available)}
-                      </div>
-                    </Fragment>
-                  ))}
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         );

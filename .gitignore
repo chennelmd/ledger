@@ -5,6 +5,7 @@ qa-artifacts/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/app.db.backup-*
 src/db/migrations/
 
 .env

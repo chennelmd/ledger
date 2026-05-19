@@ -1,8 +1,13 @@
 import { Hono } from 'hono';
 import { and, eq, isNull, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
+import rrulePkg from 'rrule';
 import { db, schema } from '../../db/client.js';
 
 export const dashboardRouter = new Hono();
+const { rrulestr } = rrulePkg;
+const linkedDebtCategories = alias(schema.categories, 'linked_debt_categories');
+const activityCategoryId = sql<string | null>`coalesce(${schema.transactionSplits.categoryId}, ${linkedDebtCategories.id})`;
 
 const CASH_SUBTYPES = new Set(['checking', 'savings', 'cash']);
 
@@ -21,6 +26,18 @@ function isMonth(value: string) {
   return /^\d{4}-\d{2}$/.test(value);
 }
 
+function toDateOnly(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function startOfToday() {
+  return new Date(`${toDateOnly(new Date())}T00:00:00.000Z`);
+}
+
+function occurrencesBetween(rruleText: string, startDate: Date, endDate: Date) {
+  return rrulestr(rruleText).between(startDate, endDate, true).map(toDateOnly);
+}
+
 // GET /api/dashboard/free-cash?month=YYYY-MM
 dashboardRouter.get('/free-cash', async (c) => {
   const month = c.req.query('month') ?? currentMonth();
@@ -32,6 +49,7 @@ dashboardRouter.get('/free-cash', async (c) => {
     cats,
     assignedRows,
     activityRows,
+    schedules,
   ] = await Promise.all([
     db.select({
       id: schema.accounts.id,
@@ -81,19 +99,33 @@ dashboardRouter.get('/free-cash', async (c) => {
 
     db.select({
       month: sql<string>`strftime('%Y-%m', ${schema.transactions.date})`,
-      categoryId: schema.transactionSplits.categoryId,
+      categoryId: activityCategoryId,
       activity: sql<number>`coalesce(sum(${schema.transactionSplits.amountCents}), 0)`,
     })
       .from(schema.transactionSplits)
       .innerJoin(schema.transactions, eq(schema.transactionSplits.transactionId, schema.transactions.id))
+      .leftJoin(linkedDebtCategories, eq(linkedDebtCategories.linkedDebtAccountId, schema.transactionSplits.transferAccountId))
       .where(and(
         isNull(schema.transactions.deletedAt),
         sql`strftime('%Y-%m', ${schema.transactions.date}) <= ${month}`,
       ))
       .groupBy(
         sql`strftime('%Y-%m', ${schema.transactions.date})`,
-        schema.transactionSplits.categoryId,
+        activityCategoryId,
       ),
+
+    db.select({
+      id: schema.schedules.id,
+      name: schema.schedules.name,
+      categoryId: schema.schedules.categoryId,
+      amountCents: schema.schedules.amountCents,
+      rrule: schema.schedules.rrule,
+    })
+      .from(schema.schedules)
+      .where(and(
+        isNull(schema.schedules.deletedAt),
+        eq(schema.schedules.isActive, true),
+      )),
   ]);
 
   const accountTxnMap = new Map(accountTxnSums.map((row) => [row.accountId, Number(row.net)]));
@@ -157,15 +189,61 @@ dashboardRouter.get('/free-cash', async (c) => {
     (sum, cat) => sum + cat.availableCents,
     0,
   );
+  const reserveByCategoryId = new Map(
+    categoryBalances.map((cat) => [cat.id, cat.availableCents]),
+  );
+
+  const today = startOfToday();
+  const endDate = new Date(today);
+  endDate.setUTCDate(endDate.getUTCDate() + 30);
+
+  const scheduledByCategoryId = new Map<string, number>();
+  const upcomingScheduledOutflows = [];
+
+  for (const schedule of schedules) {
+    if (!schedule.categoryId) continue;
+    const dates = occurrencesBetween(schedule.rrule, today, endDate);
+    for (const date of dates) {
+      const outflowCents = Math.max(0, -schedule.amountCents);
+      if (outflowCents === 0) continue;
+
+      upcomingScheduledOutflows.push({
+        id: schedule.id,
+        name: schedule.name,
+        date,
+        categoryId: schedule.categoryId,
+        amountCents: schedule.amountCents,
+      });
+
+      scheduledByCategoryId.set(
+        schedule.categoryId,
+        (scheduledByCategoryId.get(schedule.categoryId) ?? 0) + outflowCents,
+      );
+    }
+  }
+
+  let uncoveredScheduledOutflowsCents = 0;
+  for (const [categoryId, scheduledCents] of scheduledByCategoryId) {
+    const reserveCents = reserveByCategoryId.get(categoryId) ?? 0;
+    uncoveredScheduledOutflowsCents += Math.max(0, scheduledCents - reserveCents);
+  }
+
+  const scheduledOutflowsCents = upcomingScheduledOutflows.reduce(
+    (sum, row) => sum + Math.max(0, -row.amountCents),
+    0,
+  );
+
+  upcomingScheduledOutflows.sort((a, b) => a.date.localeCompare(b.date));
 
   return c.json({
     month,
     cashBalanceCents,
     reservedEnvelopeCents,
-    scheduledOutflowsCents: 0,
-    uncoveredScheduledOutflowsCents: 0,
-    freeCashCents: cashBalanceCents - reservedEnvelopeCents,
+    scheduledOutflowsCents,
+    uncoveredScheduledOutflowsCents,
+    freeCashCents: cashBalanceCents - reservedEnvelopeCents - uncoveredScheduledOutflowsCents,
     cashAccounts,
     reservedCategories: categoryBalances,
+    upcomingScheduledOutflows,
   });
 });

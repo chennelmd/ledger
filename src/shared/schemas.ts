@@ -42,6 +42,7 @@ export const NewAccountSchema = z.object({
   // Only used at creation time for on-budget liability accounts with non-zero starting balance.
   // The server converts the starting balance into a categorized transaction; this field names the category.
   startingBalanceCategoryId: z.string().nullable().optional(),
+  linkedDebtCategoryId: z.string().nullable().optional(),
 });
 
 export type NewAccountInput = z.infer<typeof NewAccountSchema>;
@@ -124,6 +125,22 @@ export const TransferUpdateSchema = z.object({
 });
 
 export type TransferUpdateInput = z.infer<typeof TransferUpdateSchema>;
+
+// ─── Schedules ───────────────────────────────────────────────────────────────
+
+export const NewScheduleSchema = z.object({
+  name: z.string().min(1).max(120),
+  accountId: z.string().min(1),
+  categoryId: z.string().min(1),
+  amountCents: z.number().int(),
+  rrule: z.string().min(1),
+  nextOccurrence: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  isActive: z.boolean().default(true),
+  autoPost: z.boolean().default(false),
+  notes: z.string().nullable().optional(),
+});
+
+export type NewScheduleInput = z.infer<typeof NewScheduleSchema>;
 
 // ─── Budget ───────────────────────────────────────────────────────────────────
 

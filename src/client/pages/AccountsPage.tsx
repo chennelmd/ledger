@@ -4,7 +4,7 @@ import { Pencil } from 'lucide-react';
 import type { Account } from '../../db/schema.js';
 import { AddAccountModal } from '../components/AddAccountModal.js';
 
-type AccountWithBalance = Account & { balanceCents: number };
+type AccountWithBalance = Account & { balanceCents: number; debtCategoryId?: string | null };
 
 async function fetchAccounts(): Promise<AccountWithBalance[]> {
   const res = await fetch('/api/accounts');

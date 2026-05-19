@@ -15,6 +15,14 @@ accountsRouter.get('/', async (c) => {
     .where(isNull(schema.accounts.deletedAt))
     .orderBy(schema.accounts.sortOrder);
 
+  const linkedDebtCategories = await db
+    .select({
+      id: schema.categories.id,
+      linkedDebtAccountId: schema.categories.linkedDebtAccountId,
+    })
+    .from(schema.categories)
+    .where(isNull(schema.categories.deletedAt));
+
   // coalesce so sum() never returns null; Number() guards against string coercion
   const sums = await db
     .select({
@@ -26,10 +34,16 @@ accountsRouter.get('/', async (c) => {
     .groupBy(schema.transactions.accountId);
 
   const sumMap = new Map(sums.map((s) => [s.accountId, Number(s.net)]));
+  const debtCategoryMap = new Map(
+    linkedDebtCategories
+      .filter((category) => category.linkedDebtAccountId)
+      .map((category) => [category.linkedDebtAccountId!, category.id]),
+  );
 
   const enriched = rows.map((a) => ({
     ...a,
     balanceCents: a.startingBalanceCents + (sumMap.get(a.id) ?? 0),
+    debtCategoryId: debtCategoryMap.get(a.id) ?? null,
   }));
 
   return c.json(enriched);
@@ -45,7 +59,14 @@ accountsRouter.get('/:id', async (c) => {
     .get();
 
   if (!row) return c.json({ error: 'not found' }, 404);
-  return c.json(row);
+
+  const linkedDebtCategory = await db
+    .select({ id: schema.categories.id })
+    .from(schema.categories)
+    .where(eq(schema.categories.linkedDebtAccountId, id))
+    .get();
+
+  return c.json({ ...row, debtCategoryId: linkedDebtCategory?.id ?? null });
 });
 
 // POST /api/accounts — create
@@ -56,17 +77,24 @@ accountsRouter.post('/', async (c) => {
     return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   }
 
-  const { startingBalanceCategoryId, ...accountData } = parsed.data;
+  const {
+    linkedDebtCategoryId,
+    startingBalanceCategoryId = linkedDebtCategoryId,
+    ...accountData
+  } = parsed.data;
   const id = nanoid();
 
-  // For on-budget liability accounts with pre-existing debt, the starting balance must become a
-  // categorized transaction so the linked debt envelope gets permanent negative activity.
+  // For on-budget liability accounts with pre-existing debt, a selected category lets the
+  // starting balance become budget activity for the linked debt envelope.
   // Without this, assignments to the envelope grow its available balance forever while the
   // account balance never changes (payments are transfers), making RTA go deeply negative.
+  // If no category is selected, keep the starting balance on the account instead of creating
+  // an uncategorized ledger row.
   const needsStartingBalanceTx =
     accountData.isOnBudget &&
     accountData.type === 'liability' &&
-    accountData.startingBalanceCents !== 0;
+    accountData.startingBalanceCents !== 0 &&
+    !!startingBalanceCategoryId;
 
   const inserted = db.transaction((tx) => {
     const account = tx
@@ -103,6 +131,17 @@ accountsRouter.post('/', async (c) => {
       }).run();
     }
 
+    if (linkedDebtCategoryId) {
+      tx.update(schema.categories)
+        .set({ linkedDebtAccountId: null, updatedAt: new Date().toISOString() })
+        .where(eq(schema.categories.linkedDebtAccountId, id))
+        .run();
+      tx.update(schema.categories)
+        .set({ linkedDebtAccountId: id, updatedAt: new Date().toISOString() })
+        .where(eq(schema.categories.id, linkedDebtCategoryId))
+        .run();
+    }
+
     return account;
   });
 
@@ -118,12 +157,34 @@ accountsRouter.patch('/:id', async (c) => {
     return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   }
 
-  const updated = await db
-    .update(schema.accounts)
-    .set({ ...parsed.data, updatedAt: new Date().toISOString() })
-    .where(eq(schema.accounts.id, id))
-    .returning()
-    .get();
+  const { startingBalanceCategoryId: _startingBalanceCategoryId, linkedDebtCategoryId, ...accountData } = parsed.data;
+
+  const updated = db.transaction((tx) => {
+    const account = tx
+      .update(schema.accounts)
+      .set({ ...accountData, updatedAt: new Date().toISOString() })
+      .where(eq(schema.accounts.id, id))
+      .returning()
+      .get();
+
+    if (!account) return null;
+
+    if (linkedDebtCategoryId !== undefined) {
+      tx.update(schema.categories)
+        .set({ linkedDebtAccountId: null, updatedAt: new Date().toISOString() })
+        .where(eq(schema.categories.linkedDebtAccountId, id))
+        .run();
+
+      if (linkedDebtCategoryId) {
+        tx.update(schema.categories)
+          .set({ linkedDebtAccountId: id, updatedAt: new Date().toISOString() })
+          .where(eq(schema.categories.id, linkedDebtCategoryId))
+          .run();
+      }
+    }
+
+    return account;
+  });
 
   if (!updated) return c.json({ error: 'not found' }, 404);
   return c.json(updated);
