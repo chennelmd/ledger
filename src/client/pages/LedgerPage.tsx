@@ -20,6 +20,7 @@ interface TxnRow {
   notes: string | null;
   cleared: boolean;
   splitAmountCents: number | null;
+  splitNotes: string | null;
 }
 
 interface CategoryItem { id: string; name: string; }
@@ -29,7 +30,7 @@ interface EditForm {
   date: string;
   payeeName: string;
   notes: string;
-  splits: Array<{ categoryId: string; amount: string }>;
+  splits: Array<{ categoryId: string; amount: string; notes: string }>;
   amount: string; // used for transfer edits only
   accountId: string;
 }
@@ -298,7 +299,8 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       const allSplitRows = txns!.filter(r => r.id === t.id);
       const splits = allSplitRows.map(r => ({
         categoryId: r.categoryId ?? '',
-        amount: ((r.splitAmountCents ?? r.amountCents) / 100).toFixed(2),
+        amount: (Math.abs(r.splitAmountCents ?? r.amountCents) / 100).toFixed(2),
+        notes: r.splitNotes ?? '',
       }));
       setEditForm({
         date: t.date,
@@ -321,10 +323,12 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       };
       editMutation.mutate({ id: t.transferId, body, isTransfer: true });
     } else {
+      const sign = t.amountCents < 0 || (t.amountCents === 0 && (t.splitAmountCents ?? 0) < 0) ? -1 : 1;
       const parsedSplits = editForm.splits
         .map(s => ({
-          amountCents: Math.round(parseFloat(s.amount || '0') * 100),
+          amountCents: sign * Math.round(Math.abs(parseFloat(s.amount || '0')) * 100),
           categoryId: s.categoryId || null,
+          notes: s.notes.trim() || null,
         }))
         .filter(s => s.amountCents !== 0 || s.categoryId);
       const totalCents = parsedSplits.reduce((sum, s) => sum + s.amountCents, 0);
@@ -508,15 +512,29 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         {isTransfer ? (
                           <span style={S.tdMuted}>—</span>
                         ) : (
-                          catSelect(split0?.categoryId ?? '', (v) => {
-                            const next = editForm.splits.map((s, i) => i === 0 ? { ...s, categoryId: v } : s);
-                            setEditForm({ ...editForm, splits: next });
-                          }, () => {
-                            setEditForm({
-                              ...editForm,
-                              splits: [...editForm.splits, { categoryId: '', amount: '' }],
-                            });
-                          })
+                          <div>
+                            {catSelect(split0?.categoryId ?? '', (v) => {
+                              const next = editForm.splits.map((s, i) => i === 0 ? { ...s, categoryId: v } : s);
+                              setEditForm({ ...editForm, splits: next });
+                            }, () => {
+                              setEditForm({
+                                ...editForm,
+                                splits: [...editForm.splits, { categoryId: '', amount: '', notes: '' }],
+                              });
+                            })}
+                            {editForm.splits.length > 1 && (
+                              <input
+                                style={{ ...S.cellInput, marginTop: 6 }}
+                                type="text"
+                                value={split0?.notes ?? ''}
+                                onChange={(e) => {
+                                  const next = editForm.splits.map((s, i) => i === 0 ? { ...s, notes: e.target.value } : s);
+                                  setEditForm({ ...editForm, splits: next });
+                                }}
+                                placeholder="Split note"
+                              />
+                            )}
+                          </div>
                         )}
                       </td>
                       <td style={{ ...S.td, ...S.tdMono }}>
@@ -571,10 +589,22 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         <td style={S.td} /><td style={S.td} /><td style={S.td} />
                         <td style={S.td}>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 24px', gap: 6, alignItems: 'center' }}>
-                            {catSelect(splitEntry?.categoryId ?? '', (v) => {
-                              const next = editForm.splits.map((s, j) => j === idx ? { ...s, categoryId: v } : s);
-                              setEditForm({ ...editForm, splits: next });
-                            })}
+                            <div>
+                              {catSelect(splitEntry?.categoryId ?? '', (v) => {
+                                const next = editForm.splits.map((s, j) => j === idx ? { ...s, categoryId: v } : s);
+                                setEditForm({ ...editForm, splits: next });
+                              })}
+                              <input
+                                style={{ ...S.cellInput, marginTop: 6 }}
+                                type="text"
+                                value={splitEntry?.notes ?? ''}
+                                onChange={(e) => {
+                                  const next = editForm.splits.map((s, j) => j === idx ? { ...s, notes: e.target.value } : s);
+                                  setEditForm({ ...editForm, splits: next });
+                                }}
+                                placeholder="Split note"
+                              />
+                            </div>
                             <button
                               type="button"
                               style={S.iconBtnDanger}
@@ -692,6 +722,11 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                           <span style={{ color: '#78716C', fontSize: 12.5 }}>
                             ↳ {row.categoryName ?? <em style={{ color: '#A8A29E' }}>Uncategorized</em>}
                           </span>
+                          {row.splitNotes && (
+                            <span style={{ color: '#A8A29E', fontSize: 11.5, marginLeft: 8 }}>
+                              {row.splitNotes}
+                            </span>
+                          )}
                         </td>
                         <td style={{ ...S.td, ...S.tdMono, color: '#78716C', fontSize: 12.5 }}>
                           {fmt$(row.splitAmountCents ?? 0)}

@@ -90,6 +90,7 @@ export type NewPayeeInput = z.infer<typeof NewPayeeSchema>;
 export const SplitInputSchema = z.object({
   amountCents: z.number().int(),
   categoryId: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
 });
 
 export const NewTransactionSchema = z.object({

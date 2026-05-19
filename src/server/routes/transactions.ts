@@ -38,6 +38,7 @@ transactionsRouter.get('/', async (c) => {
       categoryId: schema.transactionSplits.categoryId,
       categoryName: schema.categories.name,
       splitAmountCents: schema.transactionSplits.amountCents,
+      splitNotes: schema.transactionSplits.notes,
       transferId: schema.transactions.transferId,
       transferAccountName: transferAccounts.name,
       createdAt: schema.transactions.createdAt,
@@ -69,16 +70,17 @@ transactionsRouter.post('/', async (c) => {
   }
 
   // Normalise to a splits array for the insert loop
-  type SplitRow = { amountCents: number; categoryId: string | null; sortOrder: number };
+  type SplitRow = { amountCents: number; categoryId: string | null; notes: string | null; sortOrder: number };
   let splitsToInsert: SplitRow[] = [];
   if (data.splits && data.splits.length > 0) {
     splitsToInsert = data.splits.map((s, i) => ({
       amountCents: s.amountCents,
       categoryId: s.categoryId ?? null,
+      notes: s.notes ?? null,
       sortOrder: i,
     }));
   } else if (data.categoryId) {
-    splitsToInsert = [{ amountCents: data.amountCents, categoryId: data.categoryId, sortOrder: 0 }];
+    splitsToInsert = [{ amountCents: data.amountCents, categoryId: data.categoryId, notes: null, sortOrder: 0 }];
   }
 
   const result = db.transaction((tx) => {
@@ -118,6 +120,7 @@ transactionsRouter.post('/', async (c) => {
         transactionId: txn.id,
         amountCents: split.amountCents,
         categoryId: split.categoryId,
+        notes: split.notes,
         sortOrder: split.sortOrder,
       }).run();
     }
@@ -290,6 +293,7 @@ transactionsRouter.patch('/:id', async (c) => {
           transactionId: id,
           amountCents: splits[i].amountCents,
           categoryId: splits[i].categoryId ?? null,
+          notes: splits[i].notes ?? null,
           sortOrder: i,
         }).run();
       }
