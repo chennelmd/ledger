@@ -31,6 +31,17 @@ function upcomingOccurrences(rruleText: string, startDate: Date, endDate: Date) 
   return rule.between(startDate, endDate, true).map(toDateOnly);
 }
 
+function advanceScheduleFields(rruleText: string, occurrenceDate: string, now: string) {
+  const next = nextOccurrenceAfter(rruleText, atStartOfDay(occurrenceDate), false);
+  const fields: Record<string, unknown> = { updatedAt: now };
+  if (next) {
+    fields.nextOccurrence = next;
+  } else {
+    fields.isActive = false;
+  }
+  return fields;
+}
+
 // GET /api/schedules?days=30 — active schedules with upcoming occurrences
 schedulesRouter.get('/', async (c) => {
   const days = Math.min(Math.max(Number(c.req.query('days') ?? 30), 1), 365);
@@ -156,13 +167,7 @@ schedulesRouter.post('/:id/post', async (c) => {
       sortOrder: 0,
     }).run();
 
-    const next = nextOccurrenceAfter(schedule.rrule, atStartOfDay(schedule.nextOccurrence), false);
-    const scheduleFields: Record<string, unknown> = { updatedAt: now };
-    if (next) {
-      scheduleFields.nextOccurrence = next;
-    } else {
-      scheduleFields.isActive = false;
-    }
+    const scheduleFields = advanceScheduleFields(schedule.rrule, schedule.nextOccurrence, now);
 
     const updatedSchedule = tx
       .update(schema.schedules)
@@ -177,6 +182,34 @@ schedulesRouter.post('/:id/post', async (c) => {
   if (!result) return c.json({ error: 'not found' }, 404);
   if ('error' in result) return c.json({ error: result.error }, 400);
   return c.json(result, 201);
+});
+
+// POST /api/schedules/:id/skip — advance the next occurrence without posting
+schedulesRouter.post('/:id/skip', async (c) => {
+  const id = c.req.param('id');
+  const now = new Date().toISOString();
+
+  const result = db.transaction((tx) => {
+    const schedule = tx
+      .select()
+      .from(schema.schedules)
+      .where(and(eq(schema.schedules.id, id), isNull(schema.schedules.deletedAt)))
+      .get();
+
+    if (!schedule) return null;
+    if (!schedule.isActive) return { error: 'schedule is inactive' };
+
+    return tx
+      .update(schema.schedules)
+      .set(advanceScheduleFields(schedule.rrule, schedule.nextOccurrence, now))
+      .where(eq(schema.schedules.id, schedule.id))
+      .returning()
+      .get();
+  });
+
+  if (!result) return c.json({ error: 'not found' }, 404);
+  if ('error' in result) return c.json({ error: result.error }, 400);
+  return c.json(result);
 });
 
 // PATCH /api/schedules/:id — update a schedule

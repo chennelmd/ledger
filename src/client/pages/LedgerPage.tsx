@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Pencil, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Pencil, Send, SkipForward, Trash2 } from 'lucide-react';
 import type { Account } from '../../db/schema.js';
 import { AddTransactionModal } from '../components/AddTransactionModal.js';
 
@@ -26,6 +26,19 @@ interface TxnRow {
 interface CategoryItem { id: string; name: string; }
 interface CategoryGroup { id: string; name: string; categories: CategoryItem[]; }
 type AccountRow = Account & { balanceCents: number };
+
+interface ScheduleRow {
+  id: string;
+  name: string;
+  accountId: string;
+  accountName: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+  amountCents: number;
+  nextOccurrence: string;
+  isActive: boolean;
+  notes: string | null;
+}
 
 interface EditForm {
   date: string;
@@ -58,6 +71,12 @@ async function fetchCategories(): Promise<CategoryGroup[]> {
   return res.json();
 }
 
+async function fetchSchedules(): Promise<ScheduleRow[]> {
+  const res = await fetch('/api/schedules?days=365');
+  if (!res.ok) throw new Error('failed to fetch schedules');
+  return res.json();
+}
+
 async function patchTransaction(id: string, body: Record<string, unknown>) {
   const res = await fetch(`/api/transactions/${id}`, {
     method: 'PATCH',
@@ -81,6 +100,24 @@ async function patchTransfer(transferId: string, body: Record<string, unknown>) 
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error('failed to update transfer');
+  return res.json();
+}
+
+async function postScheduleOccurrence(id: string) {
+  const res = await fetch(`/api/schedules/${id}/post`, { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? 'failed to post schedule');
+  }
+  return res.json();
+}
+
+async function skipScheduleOccurrence(id: string) {
+  const res = await fetch(`/api/schedules/${id}/skip`, { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? 'failed to skip schedule');
+  }
   return res.json();
 }
 
@@ -178,6 +215,28 @@ const S = {
     display: 'inline-flex',
     alignItems: 'center',
   },
+  scheduleAction: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    color: '#A8A29E',
+    padding: 3,
+    display: 'inline-flex',
+    alignItems: 'center',
+  },
+  upcomingBadge: {
+    display: 'inline-block',
+    fontSize: 10.5,
+    fontWeight: 700,
+    letterSpacing: '0.04em',
+    color: '#6D28D9',
+    background: '#F1E8FF',
+    padding: '2px 6px',
+  },
+  scheduleRow: {
+    background: '#F7F2EA',
+    opacity: 0.72,
+  },
   saveBtn: {
     background: '#1C1917',
     border: 'none',
@@ -270,6 +329,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
 
   const { data: accounts }  = useQuery({ queryKey: ['accounts'], queryFn: fetchAccounts });
   const { data: groups }    = useQuery({ queryKey: ['categories'], queryFn: fetchCategories });
+  const { data: schedules } = useQuery({ queryKey: ['schedules'], queryFn: fetchSchedules });
   const { data: txns, isLoading, error } = useQuery({
     queryKey: ['transactions', accountId],
     queryFn: () => fetchTransactions(accountId),
@@ -297,6 +357,25 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['transactions'] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
+    },
+  });
+
+  const postScheduleMutation = useMutation({
+    mutationFn: postScheduleOccurrence,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schedules'] });
+      qc.invalidateQueries({ queryKey: ['transactions'] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['budget'] });
+    },
+  });
+
+  const skipScheduleMutation = useMutation({
+    mutationFn: skipScheduleOccurrence,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schedules'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
 
@@ -381,6 +460,11 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
     if (window.confirm('Delete this transaction?')) deleteMutation.mutate(id);
   }
 
+  const visibleSchedules = (schedules ?? []).filter((schedule) =>
+    schedule.isActive && (!accountId || schedule.accountId === accountId)
+  );
+  const hasLedgerRows = (txns?.length ?? 0) > 0 || visibleSchedules.length > 0;
+
   return (
     <>
       {showAdd && (
@@ -410,11 +494,11 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       {isLoading && <p style={{ color: '#78716C' }}>Loading…</p>}
       {error && <p style={{ color: '#7A1F2B' }}>Error: {(error as Error).message}</p>}
 
-      {txns && txns.length === 0 && (
+      {txns && !hasLedgerRows && (
         <div style={S.empty}>No transactions yet.</div>
       )}
 
-      {txns && txns.length > 0 && (
+      {txns && hasLedgerRows && (
         <table style={S.table}>
           <thead>
             <tr>
@@ -442,6 +526,19 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
               const runningBalanceByAccount = new Map(
                 (accounts ?? []).map((account) => [account.id, account.balanceCents]),
               );
+              const futureTotalsByAccount = new Map<string, number>();
+              for (const schedule of visibleSchedules) {
+                futureTotalsByAccount.set(
+                  schedule.accountId,
+                  (futureTotalsByAccount.get(schedule.accountId) ?? 0) + schedule.amountCents,
+                );
+              }
+              for (const [futureAccountId, futureTotal] of futureTotalsByAccount) {
+                const currentBalance = runningBalanceByAccount.get(futureAccountId);
+                if (currentBalance !== undefined) {
+                  runningBalanceByAccount.set(futureAccountId, currentBalance + futureTotal);
+                }
+              }
               const monoInput = { ...S.cellInput, textAlign: 'right' as const, fontFamily: "'JetBrains Mono', monospace" };
               const catSelect = (
                 value: string,
@@ -473,7 +570,84 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                 </select>
               );
 
-              return [...groupMap.values()].flatMap((rows) => {
+              const ledgerItems = [
+                ...visibleSchedules.map((schedule) => ({
+                  type: 'schedule' as const,
+                  id: schedule.id,
+                  date: schedule.nextOccurrence,
+                  schedule,
+                })),
+                ...[...groupMap.values()].map((rows) => ({
+                  type: 'transaction' as const,
+                  id: rows[0].id,
+                  date: rows[0].date,
+                  rows,
+                })),
+              ].sort((a, b) => {
+                const dateCompare = b.date.localeCompare(a.date);
+                if (dateCompare !== 0) return dateCompare;
+                if (a.type !== b.type) return a.type === 'schedule' ? -1 : 1;
+                return a.id.localeCompare(b.id);
+              });
+
+              return ledgerItems.flatMap((item) => {
+                if (item.type === 'schedule') {
+                  const schedule = item.schedule;
+                  const balanceAfterCents = runningBalanceByAccount.get(schedule.accountId);
+                  if (balanceAfterCents !== undefined) {
+                    runningBalanceByAccount.set(schedule.accountId, balanceAfterCents - schedule.amountCents);
+                  }
+
+                  return [(
+                    <tr key={`schedule|${schedule.id}`} style={S.scheduleRow}>
+                      <td style={{ ...S.td, fontStyle: 'italic', color: '#78716C' }}>{fmtDate(schedule.nextOccurrence)}</td>
+                      <td style={{ ...S.td, color: '#78716C', fontSize: 12.5 }}>{schedule.accountName ?? '—'}</td>
+                      <td style={{ ...S.td, color: '#78716C', fontStyle: 'italic' }}>
+                        {schedule.name}
+                      </td>
+                      <td style={{ ...S.td, color: schedule.notes ? '#78716C' : '#A8A29E', fontSize: 12.5, fontStyle: 'italic' }}>
+                        {schedule.notes ?? schedule.categoryName ?? '—'}
+                      </td>
+                      <td style={S.td}>
+                        <span style={S.upcomingBadge}>Upcoming</span>
+                      </td>
+                      <td style={{
+                        ...S.td,
+                        ...S.tdMono,
+                        color: '#78716C',
+                        fontStyle: 'italic',
+                      }}>
+                        {fmt$(schedule.amountCents)}
+                      </td>
+                      <td style={{ ...S.td, ...S.tdMono, color: '#78716C', fontStyle: 'italic' }}>
+                        {!accountId || balanceAfterCents === undefined ? '—' : fmt$(balanceAfterCents)}
+                      </td>
+                      <td style={{ ...S.td, textAlign: 'center', color: '#A8A29E' }}>—</td>
+                      <td style={{ ...S.td, whiteSpace: 'nowrap', padding: '11px 8px' }}>
+                        <button
+                          style={S.scheduleAction}
+                          onClick={() => postScheduleMutation.mutate(schedule.id)}
+                          disabled={postScheduleMutation.isPending || skipScheduleMutation.isPending}
+                          aria-label={`Post ${schedule.name}`}
+                          title="Post scheduled transaction"
+                        >
+                          <Send size={13} />
+                        </button>
+                        <button
+                          style={S.scheduleAction}
+                          onClick={() => skipScheduleMutation.mutate(schedule.id)}
+                          disabled={postScheduleMutation.isPending || skipScheduleMutation.isPending}
+                          aria-label={`Skip ${schedule.name}`}
+                          title="Skip this occurrence"
+                        >
+                          <SkipForward size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  )];
+                }
+
+                const rows = item.rows;
                 const first = rows[0];
                 const isEditing = editingId === first.id;
                 const isTransfer = !!first.transferAccountName;
