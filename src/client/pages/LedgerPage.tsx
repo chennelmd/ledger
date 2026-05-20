@@ -600,9 +600,9 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                   rows,
                 })),
               ].sort((a, b) => {
+                if (a.type !== b.type) return a.type === 'schedule' ? -1 : 1;
                 const dateCompare = b.date.localeCompare(a.date);
                 if (dateCompare !== 0) return dateCompare;
-                if (a.type !== b.type) return a.type === 'schedule' ? -1 : 1;
                 return a.id.localeCompare(b.id);
               });
 
