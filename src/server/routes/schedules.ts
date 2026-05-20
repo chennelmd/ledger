@@ -42,12 +42,17 @@ function advanceScheduleFields(rruleText: string, occurrenceDate: string, now: s
   return fields;
 }
 
-// GET /api/schedules?days=30 — active schedules due within the requested window
+// GET /api/schedules?days=30 — schedules, optionally limited to a due-date window
 schedulesRouter.get('/', async (c) => {
-  const days = Math.min(Math.max(Number(c.req.query('days') ?? 30), 1), 365);
+  const daysParam = c.req.query('days');
+  const days = daysParam ? Math.min(Math.max(Number(daysParam), 1), 365) : null;
   const start = startOfToday();
   const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + days);
+  end.setUTCDate(end.getUTCDate() + (days ?? 365));
+  const conditions = [
+    isNull(schema.schedules.deletedAt),
+  ];
+  if (days !== null) conditions.push(lte(schema.schedules.nextOccurrence, toDateOnly(end)));
 
   const rows = await db
     .select({
@@ -68,11 +73,7 @@ schedulesRouter.get('/', async (c) => {
     .from(schema.schedules)
     .innerJoin(schema.accounts, eq(schema.schedules.accountId, schema.accounts.id))
     .leftJoin(schema.categories, eq(schema.schedules.categoryId, schema.categories.id))
-    .where(and(
-      isNull(schema.schedules.deletedAt),
-      eq(schema.schedules.isActive, true),
-      lte(schema.schedules.nextOccurrence, toDateOnly(end)),
-    ))
+    .where(and(...conditions))
     .orderBy(schema.schedules.nextOccurrence);
 
   const enriched = rows.map((row) => ({

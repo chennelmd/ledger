@@ -23,7 +23,7 @@ type Schedule = {
 };
 
 async function fetchSchedules(): Promise<Schedule[]> {
-  const res = await fetch('/api/schedules?days=7');
+  const res = await fetch('/api/schedules');
   if (!res.ok) throw new Error('failed to fetch schedules');
   return res.json();
 }
@@ -277,7 +277,7 @@ export function SchedulesPage() {
   const [notes, setNotes] = useState('');
 
   const { data: schedules, isLoading, error } = useQuery({
-    queryKey: ['schedules', 7],
+    queryKey: ['schedules', 'all'],
     queryFn: fetchSchedules,
   });
   const { data: accounts } = useQuery({ queryKey: ['accounts'], queryFn: fetchAccounts });
