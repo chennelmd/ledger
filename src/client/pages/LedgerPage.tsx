@@ -131,6 +131,14 @@ const fmtDate = (iso: string) => {
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
+const todayIso = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const SPLIT_OPTION = '__split_transaction__';
 
 // ─── styles ──────────────────────────────────────────────────────────────────
@@ -232,6 +240,14 @@ const S = {
     color: '#6D28D9',
     background: '#F1E8FF',
     padding: '2px 6px',
+  },
+  pastDueBadge: {
+    color: '#7A1F2B',
+    background: '#F7E6E8',
+  },
+  dueTodayBadge: {
+    color: '#795300',
+    background: '#FFF3CC',
   },
   scheduleRow: {
     background: '#F7F2EA',
@@ -597,6 +613,18 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                   if (balanceAfterCents !== undefined) {
                     runningBalanceByAccount.set(schedule.accountId, balanceAfterCents - schedule.amountCents);
                   }
+                  const currentDate = todayIso();
+                  const scheduleStatus =
+                    schedule.nextOccurrence < currentDate
+                      ? 'Past due'
+                      : schedule.nextOccurrence === currentDate
+                        ? 'Due today'
+                        : 'Upcoming';
+                  const scheduleBadgeStyle = {
+                    ...S.upcomingBadge,
+                    ...(scheduleStatus === 'Past due' ? S.pastDueBadge : {}),
+                    ...(scheduleStatus === 'Due today' ? S.dueTodayBadge : {}),
+                  };
 
                   return [(
                     <tr key={`schedule|${schedule.id}`} style={S.scheduleRow}>
@@ -609,7 +637,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         {schedule.notes ?? schedule.categoryName ?? '—'}
                       </td>
                       <td style={S.td}>
-                        <span style={S.upcomingBadge}>Upcoming</span>
+                        <span style={scheduleBadgeStyle}>{scheduleStatus}</span>
                       </td>
                       <td style={{
                         ...S.td,
