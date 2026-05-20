@@ -20,9 +20,9 @@ function startOfToday() {
   return atStartOfDay(toDateOnly(new Date()));
 }
 
-function nextOccurrenceAfter(rruleText: string, fromDate = new Date()) {
+function nextOccurrenceAfter(rruleText: string, fromDate = new Date(), inclusive = true) {
   const rule = rrulestr(rruleText);
-  const next = rule.after(fromDate, true);
+  const next = rule.after(fromDate, inclusive);
   return next ? toDateOnly(next) : null;
 }
 
@@ -89,6 +89,94 @@ schedulesRouter.post('/', async (c) => {
     .get();
 
   return c.json(inserted, 201);
+});
+
+// POST /api/schedules/:id/post — create the next scheduled transaction
+schedulesRouter.post('/:id/post', async (c) => {
+  const id = c.req.param('id');
+  const now = new Date().toISOString();
+
+  const result = db.transaction((tx) => {
+    const schedule = tx
+      .select()
+      .from(schema.schedules)
+      .where(and(eq(schema.schedules.id, id), isNull(schema.schedules.deletedAt)))
+      .get();
+
+    if (!schedule) return null;
+    if (!schedule.isActive) return { error: 'schedule is inactive' };
+
+    const existingPost = tx
+      .select({ id: schema.transactions.id })
+      .from(schema.transactions)
+      .where(and(
+        eq(schema.transactions.scheduleId, schedule.id),
+        eq(schema.transactions.date, schedule.nextOccurrence),
+        isNull(schema.transactions.deletedAt),
+      ))
+      .get();
+
+    if (existingPost) return { error: 'schedule occurrence is already posted' };
+
+    let payeeId: string | null = schedule.payeeId ?? null;
+    if (!payeeId) {
+      const existingPayee = tx
+        .select()
+        .from(schema.payees)
+        .where(eq(schema.payees.name, schedule.name))
+        .get();
+
+      payeeId = existingPayee
+        ? existingPayee.id
+        : tx.insert(schema.payees).values({ id: nanoid(), name: schedule.name }).returning().get().id;
+    }
+
+    const txn = tx
+      .insert(schema.transactions)
+      .values({
+        id: nanoid(),
+        accountId: schedule.accountId,
+        date: schedule.nextOccurrence,
+        amountCents: schedule.amountCents,
+        payeeId,
+        notes: schedule.notes ?? null,
+        cleared: false,
+        scheduleId: schedule.id,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get();
+
+    tx.insert(schema.transactionSplits).values({
+      id: nanoid(),
+      transactionId: txn.id,
+      amountCents: schedule.amountCents,
+      categoryId: schedule.categoryId,
+      sortOrder: 0,
+    }).run();
+
+    const next = nextOccurrenceAfter(schedule.rrule, atStartOfDay(schedule.nextOccurrence), false);
+    const scheduleFields: Record<string, unknown> = { updatedAt: now };
+    if (next) {
+      scheduleFields.nextOccurrence = next;
+    } else {
+      scheduleFields.isActive = false;
+    }
+
+    const updatedSchedule = tx
+      .update(schema.schedules)
+      .set(scheduleFields)
+      .where(eq(schema.schedules.id, schedule.id))
+      .returning()
+      .get();
+
+    return { transaction: txn, schedule: updatedSchedule };
+  });
+
+  if (!result) return c.json({ error: 'not found' }, 404);
+  if ('error' in result) return c.json({ error: result.error }, 400);
+  return c.json(result, 201);
 });
 
 // PATCH /api/schedules/:id — update a schedule

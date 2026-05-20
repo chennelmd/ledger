@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Trash2 } from 'lucide-react';
+import { Send, Trash2 } from 'lucide-react';
 import type { Account } from '../../db/schema.js';
 
 type Category = { id: string; name: string };
@@ -66,6 +66,15 @@ async function patchSchedule(id: string, payload: Record<string, unknown>) {
 async function deleteSchedule(id: string) {
   const res = await fetch(`/api/schedules/${id}`, { method: 'DELETE' });
   if (!res.ok) throw new Error('failed to delete schedule');
+  return res.json();
+}
+
+async function postScheduleOccurrence(id: string) {
+  const res = await fetch(`/api/schedules/${id}/post`, { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? 'failed to post schedule');
+  }
   return res.json();
 }
 
@@ -209,7 +218,7 @@ const S = {
   },
   row: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(0, 1.2fr) 130px 130px 120px 80px',
+    gridTemplateColumns: 'minmax(0, 1.2fr) 130px 130px 120px 150px',
     gap: 14,
     alignItems: 'center',
     padding: '14px 16px',
@@ -235,6 +244,18 @@ const S = {
     cursor: 'pointer',
     color: '#A8A29E',
     padding: 4,
+  },
+  postBtn: {
+    background: '#1C1917',
+    border: 'none',
+    color: '#FBF8F1',
+    padding: '6px 10px',
+    fontSize: 11.5,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
   },
   empty: {
     padding: 32,
@@ -290,6 +311,17 @@ export function SchedulesPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['schedules'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+
+  const postMutation = useMutation({
+    mutationFn: postScheduleOccurrence,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schedules'] });
+      qc.invalidateQueries({ queryKey: ['transactions'] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['budget'] });
     },
   });
 
@@ -475,6 +507,16 @@ export function SchedulesPage() {
                 <div style={S.name}>{dueLabel(schedule.nextOccurrence)}</div>
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  style={{ ...S.postBtn, opacity: postMutation.isPending ? 0.55 : 1 }}
+                  onClick={() => postMutation.mutate(schedule.id)}
+                  disabled={postMutation.isPending || !schedule.isActive}
+                  aria-label={`Post ${schedule.name}`}
+                  title={`Post ${schedule.name} on ${schedule.nextOccurrence}`}
+                >
+                  <Send size={13} />
+                  Post
+                </button>
                 <label style={{ ...S.meta, display: 'flex', gap: 6, alignItems: 'center' }}>
                   <input
                     type="checkbox"
@@ -496,6 +538,11 @@ export function SchedulesPage() {
               </div>
             </div>
           ))}
+          {postMutation.error && (
+            <div style={{ padding: '10px 16px', color: '#7A1F2B', fontSize: 12.5 }}>
+              {(postMutation.error as Error).message}
+            </div>
+          )}
         </div>
       )}
     </div>
