@@ -6,6 +6,7 @@ import type { Account } from '../../db/schema.js';
 type Category = { id: string; name: string };
 type CategoryGroup = { id: string; name: string; isIncome: boolean; categories: Category[] };
 type AmountType = 'payment' | 'deposit';
+type MonthDay = string;
 
 type Schedule = {
   id: string;
@@ -31,6 +32,8 @@ type EditScheduleForm = {
   amountType: AmountType;
   nextOccurrence: string;
   frequency: string;
+  monthDays: MonthDay[];
+  pendingMonthDay: MonthDay;
   notes: string;
   isActive: boolean;
 };
@@ -130,10 +133,25 @@ function dueLabel(date: string) {
   return `${days} days`;
 }
 
-function rruleFor(startDate: string, frequency: string) {
+function sortedMonthDays(days: MonthDay[]) {
+  return [...new Set(days)].sort((a, b) => {
+    if (a === '-1') return 1;
+    if (b === '-1') return -1;
+    return Number(a) - Number(b);
+  });
+}
+
+function fallbackMonthDays(startDate: string, days: MonthDay[]) {
+  return sortedMonthDays(days.length > 0 ? days : [String(dayOfMonth(startDate))]);
+}
+
+function rruleFor(startDate: string, frequency: string, monthDays: MonthDay[]) {
   const dtstart = startDate.replaceAll('-', '');
   const [freq, interval] = frequency.split(':');
-  return `DTSTART:${dtstart}T000000Z\nRRULE:FREQ=${freq};INTERVAL=${interval}`;
+  const byMonthDay = isMonthlyCadence(frequency)
+    ? `;BYMONTHDAY=${fallbackMonthDays(startDate, monthDays).join(',')}`
+    : '';
+  return `DTSTART:${dtstart}T000000Z\nRRULE:FREQ=${freq};INTERVAL=${interval}${byMonthDay}`;
 }
 
 function frequencyFromRrule(rrule: string) {
@@ -159,13 +177,6 @@ function dayOfMonth(date: string) {
   return Number(date.slice(8, 10));
 }
 
-function withDayOfMonth(date: string, day: number) {
-  const [year, month] = date.split('-').map(Number);
-  const lastDay = new Date(year, month, 0).getDate();
-  const safeDay = Math.min(day, lastDay);
-  return `${year}-${String(month).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}`;
-}
-
 function ordinal(day: number) {
   const suffix = day % 10 === 1 && day !== 11
     ? 'st'
@@ -175,6 +186,16 @@ function ordinal(day: number) {
         ? 'rd'
         : 'th';
   return `${day}${suffix}`;
+}
+
+function monthDayLabel(day: MonthDay) {
+  return day === '-1' ? 'Last day' : ordinal(Number(day));
+}
+
+function monthDaysFromRrule(rrule: string, nextOccurrence: string) {
+  const raw = rrule.match(/BYMONTHDAY=([^;\n]+)/)?.[1];
+  if (!raw) return [String(dayOfMonth(nextOccurrence))];
+  return sortedMonthDays(raw.split(',').filter(Boolean));
 }
 
 const S = {
@@ -296,6 +317,36 @@ const S = {
     background: '#F3F7ED',
     borderColor: '#C8D8B8',
   },
+  dayPicker: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
+    gap: 6,
+    alignItems: 'center',
+  },
+  dayChips: {
+    display: 'flex',
+    flexWrap: 'wrap' as const,
+    gap: 6,
+    marginTop: 7,
+  },
+  dayChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    border: '1px solid #E7DFD0',
+    background: '#F5EFE6',
+    color: '#57534E',
+    padding: '4px 7px',
+    fontSize: 11.5,
+  },
+  dayChipRemove: {
+    border: 'none',
+    background: 'transparent',
+    color: '#A8A29E',
+    cursor: 'pointer',
+    padding: 0,
+    fontFamily: 'inherit',
+  },
   table: {
     background: '#FBF8F1',
     border: '1px solid #E7DFD0',
@@ -376,6 +427,8 @@ export function SchedulesPage() {
   const [amountType, setAmountType] = useState<AmountType>('payment');
   const [startDate, setStartDate] = useState(today());
   const [frequency, setFrequency] = useState('MONTHLY:1');
+  const [monthDays, setMonthDays] = useState<MonthDay[]>([String(dayOfMonth(today()))]);
+  const [pendingMonthDay, setPendingMonthDay] = useState<MonthDay>(String(dayOfMonth(today())));
   const [notes, setNotes] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditScheduleForm | null>(null);
@@ -395,6 +448,9 @@ export function SchedulesPage() {
       setName('');
       setAmount('');
       setAmountType('payment');
+      const defaultDay = String(dayOfMonth(today()));
+      setMonthDays([defaultDay]);
+      setPendingMonthDay(defaultDay);
       setNotes('');
       setShowAdd(false);
       qc.invalidateQueries({ queryKey: ['schedules'] });
@@ -448,6 +504,8 @@ export function SchedulesPage() {
       amountType: amountTypeFromCents(schedule.amountCents),
       nextOccurrence: schedule.nextOccurrence,
       frequency: frequencyFromRrule(schedule.rrule),
+      monthDays: monthDaysFromRrule(schedule.rrule, schedule.nextOccurrence),
+      pendingMonthDay: String(dayOfMonth(schedule.nextOccurrence)),
       notes: schedule.notes ?? '',
       isActive: schedule.isActive,
     });
@@ -467,7 +525,7 @@ export function SchedulesPage() {
         accountId: editForm.accountId,
         categoryId: editForm.categoryId,
         amountCents: amountCentsFor(editForm.amount, editForm.amountType),
-        rrule: rruleFor(editForm.nextOccurrence, editForm.frequency),
+        rrule: rruleFor(editForm.nextOccurrence, editForm.frequency, editForm.monthDays),
         nextOccurrence: editForm.nextOccurrence,
         notes: editForm.notes.trim() || null,
         isActive: editForm.isActive,
@@ -484,9 +542,59 @@ export function SchedulesPage() {
       accountId,
       categoryId,
       amountCents: amountCentsFor(amount, amountType),
-      rrule: rruleFor(startDate, frequency),
+      rrule: rruleFor(startDate, frequency, monthDays),
       nextOccurrence: startDate,
       notes: notes.trim() || null,
+    });
+  }
+
+  function addMonthDay() {
+    setMonthDays(sortedMonthDays([...monthDays, pendingMonthDay]));
+  }
+
+  function removeMonthDay(day: MonthDay) {
+    setMonthDays(monthDays.filter((monthDay) => monthDay !== day));
+  }
+
+  function addEditMonthDay() {
+    if (!editForm) return;
+    setEditForm({
+      ...editForm,
+      monthDays: sortedMonthDays([...editForm.monthDays, editForm.pendingMonthDay]),
+    });
+  }
+
+  function removeEditMonthDay(day: MonthDay) {
+    if (!editForm) return;
+    setEditForm({
+      ...editForm,
+      monthDays: editForm.monthDays.filter((monthDay) => monthDay !== day),
+    });
+  }
+
+  function updateStartDate(nextDate: string) {
+    const previousDay = String(dayOfMonth(startDate));
+    const nextDay = String(dayOfMonth(nextDate));
+    setStartDate(nextDate);
+    if (monthDays.length === 1 && monthDays[0] === previousDay) {
+      setMonthDays([nextDay]);
+    }
+    if (pendingMonthDay === previousDay) {
+      setPendingMonthDay(nextDay);
+    }
+  }
+
+  function updateEditNextDate(nextDate: string) {
+    if (!editForm) return;
+    const previousDay = String(dayOfMonth(editForm.nextOccurrence));
+    const nextDay = String(dayOfMonth(nextDate));
+    setEditForm({
+      ...editForm,
+      nextOccurrence: nextDate,
+      monthDays: editForm.monthDays.length === 1 && editForm.monthDays[0] === previousDay
+        ? [nextDay]
+        : editForm.monthDays,
+      pendingMonthDay: editForm.pendingMonthDay === previousDay ? nextDay : editForm.pendingMonthDay,
     });
   }
 
@@ -584,23 +692,44 @@ export function SchedulesPage() {
                 style={S.input}
                 type="date"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={(e) => updateStartDate(e.target.value)}
                 required
               />
             </div>
             {isMonthlyCadence(frequency) && (
               <div>
-                <label style={S.label} htmlFor="schedule-day">Day</label>
-                <select
-                  id="schedule-day"
-                  style={S.select}
-                  value={dayOfMonth(startDate)}
-                  onChange={(e) => setStartDate(withDayOfMonth(startDate, Number(e.target.value)))}
-                >
-                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-                    <option key={day} value={day}>{ordinal(day)}</option>
+                <label style={S.label} htmlFor="schedule-day">Days</label>
+                <div style={S.dayPicker}>
+                  <select
+                    id="schedule-day"
+                    style={S.select}
+                    value={pendingMonthDay}
+                    onChange={(e) => setPendingMonthDay(e.target.value)}
+                  >
+                    {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                      <option key={day} value={day}>{ordinal(day)}</option>
+                    ))}
+                    <option value="-1">Last day</option>
+                  </select>
+                  <button style={S.cancelBtn} type="button" onClick={addMonthDay}>
+                    Add
+                  </button>
+                </div>
+                <div style={S.dayChips}>
+                  {fallbackMonthDays(startDate, monthDays).map((day) => (
+                    <span key={day} style={S.dayChip}>
+                      {monthDayLabel(day)}
+                      <button
+                        type="button"
+                        style={S.dayChipRemove}
+                        onClick={() => removeMonthDay(day)}
+                        aria-label={`Remove ${monthDayLabel(day)}`}
+                      >
+                        x
+                      </button>
+                    </span>
                   ))}
-                </select>
+                </div>
               </div>
             )}
             <div>
@@ -744,25 +873,43 @@ export function SchedulesPage() {
                         style={S.input}
                         type="date"
                         value={editForm.nextOccurrence}
-                        onChange={(e) => setEditForm({ ...editForm, nextOccurrence: e.target.value })}
+                        onChange={(e) => updateEditNextDate(e.target.value)}
                       />
                     </div>
                     {isMonthlyCadence(editForm.frequency) && (
                       <div>
-                        <label style={S.label} htmlFor={`edit-schedule-day-${schedule.id}`}>Day</label>
-                        <select
-                          id={`edit-schedule-day-${schedule.id}`}
-                          style={S.select}
-                          value={dayOfMonth(editForm.nextOccurrence)}
-                          onChange={(e) => setEditForm({
-                            ...editForm,
-                            nextOccurrence: withDayOfMonth(editForm.nextOccurrence, Number(e.target.value)),
-                          })}
-                        >
-                          {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-                            <option key={day} value={day}>{ordinal(day)}</option>
+                        <label style={S.label} htmlFor={`edit-schedule-day-${schedule.id}`}>Days</label>
+                        <div style={S.dayPicker}>
+                          <select
+                            id={`edit-schedule-day-${schedule.id}`}
+                            style={S.select}
+                            value={editForm.pendingMonthDay}
+                            onChange={(e) => setEditForm({ ...editForm, pendingMonthDay: e.target.value })}
+                          >
+                            {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                              <option key={day} value={day}>{ordinal(day)}</option>
+                            ))}
+                            <option value="-1">Last day</option>
+                          </select>
+                          <button style={S.cancelBtn} type="button" onClick={addEditMonthDay}>
+                            Add
+                          </button>
+                        </div>
+                        <div style={S.dayChips}>
+                          {fallbackMonthDays(editForm.nextOccurrence, editForm.monthDays).map((day) => (
+                            <span key={day} style={S.dayChip}>
+                              {monthDayLabel(day)}
+                              <button
+                                type="button"
+                                style={S.dayChipRemove}
+                                onClick={() => removeEditMonthDay(day)}
+                                aria-label={`Remove ${monthDayLabel(day)}`}
+                              >
+                                x
+                              </button>
+                            </span>
                           ))}
-                        </select>
+                        </div>
                       </div>
                     )}
                     <div>
