@@ -72,7 +72,7 @@ async function fetchCategories(): Promise<CategoryGroup[]> {
 }
 
 async function fetchSchedules(): Promise<ScheduleRow[]> {
-  const res = await fetch('/api/schedules?days=365');
+  const res = await fetch('/api/schedules?days=7');
   if (!res.ok) throw new Error('failed to fetch schedules');
   return res.json();
 }
@@ -329,7 +329,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
 
   const { data: accounts }  = useQuery({ queryKey: ['accounts'], queryFn: fetchAccounts });
   const { data: groups }    = useQuery({ queryKey: ['categories'], queryFn: fetchCategories });
-  const { data: schedules } = useQuery({ queryKey: ['schedules'], queryFn: fetchSchedules });
+  const { data: schedules } = useQuery({ queryKey: ['schedules', 7], queryFn: fetchSchedules });
   const { data: txns, isLoading, error } = useQuery({
     queryKey: ['transactions', accountId],
     queryFn: () => fetchTransactions(accountId),

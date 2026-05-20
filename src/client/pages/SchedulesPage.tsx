@@ -277,7 +277,7 @@ export function SchedulesPage() {
   const [notes, setNotes] = useState('');
 
   const { data: schedules, isLoading, error } = useQuery({
-    queryKey: ['schedules'],
+    queryKey: ['schedules', 7],
     queryFn: fetchSchedules,
   });
   const { data: accounts } = useQuery({ queryKey: ['accounts'], queryFn: fetchAccounts });
