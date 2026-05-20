@@ -181,6 +181,29 @@ const S = {
     fontFamily: 'inherit',
   },
   mono: { fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: 'tabular-nums' },
+  signedAmount: {
+    display: 'grid',
+    gridTemplateColumns: '30px minmax(0, 1fr)',
+    gap: 6,
+    alignItems: 'center',
+  },
+  signBtn: {
+    border: '1px solid #E7DFD0',
+    background: '#F5EFE6',
+    color: '#78716C',
+    height: 35,
+    width: 30,
+    padding: 0,
+    cursor: 'pointer',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 14,
+    lineHeight: 1,
+  },
+  signBtnIncome: {
+    color: '#2D5016',
+    background: '#F3F7ED',
+    borderColor: '#C8D8B8',
+  },
   errorMsg: { marginTop: 10, fontSize: 12.5, color: '#7A1F2B' },
 };
 
@@ -238,6 +261,11 @@ export function AddTransactionModal({ onClose, defaultAccountId }: Props) {
     : totalCents;
   const remainingCents = totalCents - allocatedCents;
   const splitsBalanced = !isMultiSplit || remainingCents === 0;
+  const isDeposit = mode === 'income';
+
+  function toggleAmountSign() {
+    setMode(isDeposit ? 'expense' : 'income');
+  }
 
   function addSplit() {
     if (splits.length === 1) {
@@ -321,10 +349,10 @@ export function AddTransactionModal({ onClose, defaultAccountId }: Props) {
               <div style={S.row}>
                 <div style={S.toggleGroup}>
                   <button type="button" style={S.toggleBtn(mode === 'expense')} onClick={() => setMode('expense')}>
-                    Expense
+                    Payment
                   </button>
                   <button type="button" style={S.toggleBtn(mode === 'income')} onClick={() => setMode('income')}>
-                    Income
+                    Deposit
                   </button>
                   <button type="button" style={S.toggleBtn(mode === 'transfer')} onClick={() => setMode('transfer')}>
                     Transfer
@@ -394,18 +422,30 @@ export function AddTransactionModal({ onClose, defaultAccountId }: Props) {
                     </div>
                     <div>
                       <label style={S.label} htmlFor="txn-amount">Amount</label>
-                      <input
-                        id="txn-amount"
-                        style={{ ...S.input, ...S.mono }}
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        placeholder="0.00"
-                        required
-                        autoFocus
-                      />
+                      <div style={S.signedAmount}>
+                        <button
+                          type="button"
+                          style={{ ...S.signBtn, ...(isDeposit ? S.signBtnIncome : {}) }}
+                          onClick={toggleAmountSign}
+                          aria-label={isDeposit ? 'Mark as payment' : 'Mark as deposit'}
+                          aria-pressed={isDeposit}
+                          title={isDeposit ? 'Deposit/refund' : 'Payment'}
+                        >
+                          {isDeposit ? '+' : '-'}
+                        </button>
+                        <input
+                          id="txn-amount"
+                          style={{ ...S.input, ...S.mono }}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={amount}
+                          onChange={(e) => setAmount(e.target.value)}
+                          placeholder="0.00"
+                          required
+                          autoFocus
+                        />
+                      </div>
                     </div>
                   </div>
 
