@@ -34,6 +34,7 @@ interface EditForm {
   splits: Array<{ categoryId: string; amount: string; notes: string }>;
   amount: string; // used for transfer edits only
   accountId: string;
+  amountType?: 'expense' | 'income';
 }
 
 // ─── api ─────────────────────────────────────────────────────────────────────
@@ -216,6 +217,29 @@ const S = {
     color: '#1C1917',
     fontFamily: 'inherit',
   },
+  signedAmount: {
+    display: 'grid',
+    gridTemplateColumns: '26px minmax(0, 1fr)',
+    gap: 6,
+    alignItems: 'center',
+  },
+  signBtn: {
+    border: '1px solid #D6CFC6',
+    background: '#F5EFE6',
+    color: '#78716C',
+    height: 27,
+    width: 26,
+    padding: 0,
+    cursor: 'pointer',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 13,
+    lineHeight: 1,
+  },
+  signBtnIncome: {
+    color: '#2D5016',
+    background: '#F3F7ED',
+    borderColor: '#C8D8B8',
+  },
   editRow: { background: '#FEFAF4' },
   empty: {
     padding: 48,
@@ -298,6 +322,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       });
     } else {
       const allSplitRows = txns!.filter(r => r.id === t.id);
+      const editSign = t.amountCents < 0 || (t.amountCents === 0 && (t.splitAmountCents ?? 0) < 0) ? -1 : 1;
       const splits = allSplitRows.map(r => ({
         categoryId: r.categoryId ?? '',
         amount: (Math.abs(r.splitAmountCents ?? r.amountCents) / 100).toFixed(2),
@@ -310,6 +335,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
         splits,
         amount: '',
         accountId: t.accountId,
+        amountType: editSign >= 0 ? 'income' : 'expense',
       });
     }
   }
@@ -325,7 +351,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       editMutation.mutate({ id: t.transferId, body, isTransfer: true });
     } else {
       const wasSplit = (txns?.filter(r => r.id === t.id).length ?? 0) > 1;
-      const sign = t.amountCents < 0 || (t.amountCents === 0 && (t.splitAmountCents ?? 0) < 0) ? -1 : 1;
+      const sign = editForm.amountType === 'income' ? 1 : -1;
       const parsedSplits = editForm.splits
         .map(s => ({
           amountCents: sign * Math.round(Math.abs(parseFloat(s.amount || '0')) * 100),
@@ -461,10 +487,29 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                 if (isEditing && editForm) {
                   const elems: React.ReactElement[] = [];
                   const editIsSplit = !isTransfer && editForm.splits.length > 1;
-                  const editSign = first.amountCents < 0 || (first.amountCents === 0 && (first.splitAmountCents ?? 0) < 0) ? -1 : 1;
+                  const editAmountType = editForm.amountType ?? 'expense';
+                  const editSign = editAmountType === 'income' ? 1 : -1;
                   const editTotalCents = editSign * editForm.splits.reduce(
                     (sum, split) => sum + Math.round(Math.abs(parseFloat(split.amount || '0')) * 100),
                     0,
+                  );
+                  const signToggle = (
+                    <button
+                      type="button"
+                      style={{
+                        ...S.signBtn,
+                        ...(editAmountType === 'income' ? S.signBtnIncome : {}),
+                      }}
+                      onClick={() => setEditForm({
+                        ...editForm,
+                        amountType: editAmountType === 'income' ? 'expense' : 'income',
+                      })}
+                      aria-label={editAmountType === 'income' ? 'Mark as payment' : 'Mark as deposit'}
+                      aria-pressed={editAmountType === 'income'}
+                      title={editAmountType === 'income' ? 'Deposit/refund' : 'Payment'}
+                    >
+                      {editAmountType === 'income' ? '+' : '-'}
+                    </button>
                   );
 
                   // Primary edit row
@@ -555,21 +600,27 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                             onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(first); }}
                           />
                         ) : editIsSplit ? (
-                          <span style={editTotalCents >= 0 ? S.amtPositive : S.amtNegative}>
-                            {fmt$(editTotalCents)}
-                          </span>
+                          <div style={S.signedAmount}>
+                            {signToggle}
+                            <span style={editTotalCents >= 0 ? S.amtPositive : S.amtNegative}>
+                              {fmt$(editTotalCents)}
+                            </span>
+                          </div>
                         ) : (
-                          <input
-                            style={monoInput}
-                            type="number"
-                            step="0.01"
-                            value={split0?.amount ?? ''}
-                            onChange={(e) => {
-                              const next = editForm.splits.map((s, i) => i === 0 ? { ...s, amount: e.target.value } : s);
-                              setEditForm({ ...editForm, splits: next });
-                            }}
-                            onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(first); }}
-                          />
+                          <div style={S.signedAmount}>
+                            {signToggle}
+                            <input
+                              style={monoInput}
+                              type="number"
+                              step="0.01"
+                              value={split0?.amount ?? ''}
+                              onChange={(e) => {
+                                const next = editForm.splits.map((s, i) => i === 0 ? { ...s, amount: e.target.value } : s);
+                                setEditForm({ ...editForm, splits: next });
+                              }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(first); }}
+                            />
+                          </div>
                         )}
                       </td>
                       <td style={{ ...S.td, ...S.tdMono, color: '#A8A29E' }}>—</td>
