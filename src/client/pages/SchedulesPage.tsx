@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Send, Trash2 } from 'lucide-react';
+import { Pencil, Send, SkipForward, Trash2 } from 'lucide-react';
 import type { Account } from '../../db/schema.js';
 
 type Category = { id: string; name: string };
@@ -20,6 +20,17 @@ type Schedule = {
   autoPost: boolean;
   notes: string | null;
   upcomingOccurrences: string[];
+};
+
+type EditScheduleForm = {
+  name: string;
+  accountId: string;
+  categoryId: string;
+  amount: string;
+  nextOccurrence: string;
+  frequency: string;
+  notes: string;
+  isActive: boolean;
 };
 
 async function fetchSchedules(): Promise<Schedule[]> {
@@ -78,6 +89,15 @@ async function postScheduleOccurrence(id: string) {
   return res.json();
 }
 
+async function skipScheduleOccurrence(id: string) {
+  const res = await fetch(`/api/schedules/${id}/skip`, { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? 'failed to skip schedule');
+  }
+  return res.json();
+}
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 const fmt$ = (cents: number) =>
@@ -112,6 +132,12 @@ function rruleFor(startDate: string, frequency: string) {
   const dtstart = startDate.replaceAll('-', '');
   const [freq, interval] = frequency.split(':');
   return `DTSTART:${dtstart}T000000Z\nRRULE:FREQ=${freq};INTERVAL=${interval}`;
+}
+
+function frequencyFromRrule(rrule: string) {
+  const freq = rrule.match(/FREQ=([^;\n]+)/)?.[1] ?? 'MONTHLY';
+  const interval = rrule.match(/INTERVAL=([^;\n]+)/)?.[1] ?? '1';
+  return `${freq}:${interval}`;
 }
 
 const S = {
@@ -218,11 +244,16 @@ const S = {
   },
   row: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(0, 1.2fr) 130px 130px 120px 150px',
+    gridTemplateColumns: 'minmax(0, 1.2fr) 130px 130px 120px 250px',
     gap: 14,
     alignItems: 'center',
     padding: '14px 16px',
     borderBottom: '1px solid #F0EADD',
+  },
+  editPanel: {
+    padding: 16,
+    borderBottom: '1px solid #F0EADD',
+    background: '#FEFAF4',
   },
   name: {
     fontSize: 13.5,
@@ -257,6 +288,18 @@ const S = {
     alignItems: 'center',
     gap: 5,
   },
+  skipBtn: {
+    background: '#F5EFE6',
+    border: '1px solid #E7DFD0',
+    color: '#78716C',
+    padding: '5px 9px',
+    fontSize: 11.5,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+  },
   empty: {
     padding: 32,
     background: '#FBF8F1',
@@ -275,6 +318,8 @@ export function SchedulesPage() {
   const [startDate, setStartDate] = useState(today());
   const [frequency, setFrequency] = useState('MONTHLY:1');
   const [notes, setNotes] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<EditScheduleForm | null>(null);
 
   const { data: schedules, isLoading, error } = useQuery({
     queryKey: ['schedules', 'all'],
@@ -324,6 +369,53 @@ export function SchedulesPage() {
       qc.invalidateQueries({ queryKey: ['budget'] });
     },
   });
+
+  const skipMutation = useMutation({
+    mutationFn: skipScheduleOccurrence,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schedules'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+
+  function startEdit(schedule: Schedule) {
+    setEditingId(schedule.id);
+    setEditForm({
+      name: schedule.name,
+      accountId: schedule.accountId,
+      categoryId: schedule.categoryId ?? '',
+      amount: (Math.abs(schedule.amountCents) / 100).toFixed(2),
+      nextOccurrence: schedule.nextOccurrence,
+      frequency: frequencyFromRrule(schedule.rrule),
+      notes: schedule.notes ?? '',
+      isActive: schedule.isActive,
+    });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditForm(null);
+  }
+
+  function saveEdit(id: string) {
+    if (!editForm) return;
+    const cents = Math.round(Math.abs(parseFloat(editForm.amount || '0')) * 100);
+    updateMutation.mutate({
+      id,
+      payload: {
+        name: editForm.name.trim(),
+        accountId: editForm.accountId,
+        categoryId: editForm.categoryId,
+        amountCents: -cents,
+        rrule: rruleFor(editForm.nextOccurrence, editForm.frequency),
+        nextOccurrence: editForm.nextOccurrence,
+        notes: editForm.notes.trim() || null,
+        isActive: editForm.isActive,
+      },
+    }, {
+      onSuccess: cancelEdit,
+    });
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -481,66 +573,220 @@ export function SchedulesPage() {
 
       {schedules && schedules.length > 0 && (
         <div style={S.table}>
-          {schedules.map((schedule, idx) => (
-            <div
-              key={schedule.id}
-              style={{
-                ...S.row,
-                borderBottom: idx === schedules.length - 1 ? 'none' : S.row.borderBottom,
-                opacity: schedule.isActive ? 1 : 0.55,
-              }}
-            >
-              <div>
-                <div style={S.name}>{schedule.name}</div>
-                <div style={S.meta}>
-                  {schedule.accountName}
-                  {schedule.categoryName ? ` · ${schedule.categoryName}` : ''}
+          {schedules.map((schedule, idx) => {
+            const isEditing = editingId === schedule.id && editForm;
+            if (isEditing) {
+              return (
+                <div
+                  key={schedule.id}
+                  style={{
+                    ...S.editPanel,
+                    borderBottom: idx === schedules.length - 1 ? 'none' : S.row.borderBottom,
+                  }}
+                >
+                  <div style={S.grid}>
+                    <div>
+                      <label style={S.label} htmlFor={`edit-schedule-name-${schedule.id}`}>Name</label>
+                      <input
+                        id={`edit-schedule-name-${schedule.id}`}
+                        style={S.input}
+                        value={editForm.name}
+                        onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label style={S.label} htmlFor={`edit-schedule-account-${schedule.id}`}>Account</label>
+                      <select
+                        id={`edit-schedule-account-${schedule.id}`}
+                        style={S.select}
+                        value={editForm.accountId}
+                        onChange={(e) => setEditForm({ ...editForm, accountId: e.target.value })}
+                      >
+                        {accounts?.filter((account) => account.isOnBudget).map((account) => (
+                          <option key={account.id} value={account.id}>{account.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={S.label} htmlFor={`edit-schedule-amount-${schedule.id}`}>Amount</label>
+                      <input
+                        id={`edit-schedule-amount-${schedule.id}`}
+                        style={{ ...S.input, ...S.mono }}
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        value={editForm.amount}
+                        onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label style={S.label} htmlFor={`edit-schedule-frequency-${schedule.id}`}>Repeats</label>
+                      <select
+                        id={`edit-schedule-frequency-${schedule.id}`}
+                        style={S.select}
+                        value={editForm.frequency}
+                        onChange={(e) => setEditForm({ ...editForm, frequency: e.target.value })}
+                      >
+                        <option value="WEEKLY:1">Weekly</option>
+                        <option value="WEEKLY:2">Every 2 weeks</option>
+                        <option value="MONTHLY:1">Monthly</option>
+                        <option value="YEARLY:1">Yearly</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ ...S.grid, marginTop: 12 }}>
+                    <div>
+                      <label style={S.label} htmlFor={`edit-schedule-next-${schedule.id}`}>Next date</label>
+                      <input
+                        id={`edit-schedule-next-${schedule.id}`}
+                        style={S.input}
+                        type="date"
+                        value={editForm.nextOccurrence}
+                        onChange={(e) => setEditForm({ ...editForm, nextOccurrence: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label style={S.label} htmlFor={`edit-schedule-category-${schedule.id}`}>Category</label>
+                      <select
+                        id={`edit-schedule-category-${schedule.id}`}
+                        style={S.select}
+                        value={editForm.categoryId}
+                        onChange={(e) => setEditForm({ ...editForm, categoryId: e.target.value })}
+                      >
+                        <option value="">Select</option>
+                        {expenseGroups.map((group) => (
+                          <optgroup key={group.id} label={group.name}>
+                            {group.categories.map((cat) => (
+                              <option key={cat.id} value={cat.id}>{cat.name}</option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={S.label} htmlFor={`edit-schedule-notes-${schedule.id}`}>Notes</label>
+                      <input
+                        id={`edit-schedule-notes-${schedule.id}`}
+                        style={S.input}
+                        value={editForm.notes}
+                        onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', gap: 8 }}>
+                      <label style={{ ...S.meta, display: 'flex', gap: 6, alignItems: 'center', marginRight: 'auto' }}>
+                        <input
+                          type="checkbox"
+                          checked={editForm.isActive}
+                          onChange={(e) => setEditForm({ ...editForm, isActive: e.target.checked })}
+                        />
+                        Active
+                      </label>
+                      <button
+                        style={S.submit}
+                        type="button"
+                        onClick={() => saveEdit(schedule.id)}
+                        disabled={updateMutation.isPending || !editForm.name.trim() || !editForm.accountId || !editForm.categoryId}
+                      >
+                        Save
+                      </button>
+                      <button style={S.cancelBtn} type="button" onClick={cancelEdit}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div
+                key={schedule.id}
+                style={{
+                  ...S.row,
+                  borderBottom: idx === schedules.length - 1 ? 'none' : S.row.borderBottom,
+                  opacity: schedule.isActive ? 1 : 0.55,
+                }}
+              >
+                <div>
+                  <div style={S.name}>{schedule.name}</div>
+                  <div style={S.meta}>
+                    {schedule.accountName}
+                    {schedule.categoryName ? ` · ${schedule.categoryName}` : ''}
+                  </div>
+                </div>
+                <div style={S.mono}>{fmt$(schedule.amountCents)}</div>
+                <div>
+                  <div style={S.meta}>Next</div>
+                  <div style={S.name}>{dateLabel(schedule.nextOccurrence)}</div>
+                </div>
+                <div>
+                  <div style={S.meta}>Due in</div>
+                  <div style={S.name}>{dueLabel(schedule.nextOccurrence)}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button
+                    style={{ ...S.postBtn, opacity: postMutation.isPending ? 0.55 : 1 }}
+                    onClick={() => postMutation.mutate(schedule.id)}
+                    disabled={postMutation.isPending || skipMutation.isPending || !schedule.isActive}
+                    aria-label={`Post ${schedule.name}`}
+                    title={`Post ${schedule.name} on ${schedule.nextOccurrence}`}
+                  >
+                    <Send size={13} />
+                    Post
+                  </button>
+                  <button
+                    style={{ ...S.skipBtn, opacity: skipMutation.isPending ? 0.55 : 1 }}
+                    onClick={() => skipMutation.mutate(schedule.id)}
+                    disabled={postMutation.isPending || skipMutation.isPending || !schedule.isActive}
+                    aria-label={`Skip ${schedule.name}`}
+                    title={`Skip ${schedule.name} on ${schedule.nextOccurrence}`}
+                  >
+                    <SkipForward size={13} />
+                    Skip
+                  </button>
+                  <label style={{ ...S.meta, display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={schedule.isActive}
+                      onChange={(e) => updateMutation.mutate({
+                        id: schedule.id,
+                        payload: { isActive: e.target.checked },
+                      })}
+                    />
+                    Active
+                  </label>
+                  <button
+                    style={S.iconBtn}
+                    onClick={() => startEdit(schedule)}
+                    aria-label={`Edit ${schedule.name}`}
+                  >
+                    <Pencil size={15} />
+                  </button>
+                  <button
+                    style={S.iconBtn}
+                    onClick={() => deleteMutation.mutate(schedule.id)}
+                    aria-label={`Delete ${schedule.name}`}
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </div>
               </div>
-              <div style={S.mono}>{fmt$(schedule.amountCents)}</div>
-              <div>
-                <div style={S.meta}>Next</div>
-                <div style={S.name}>{dateLabel(schedule.nextOccurrence)}</div>
-              </div>
-              <div>
-                <div style={S.meta}>Due in</div>
-                <div style={S.name}>{dueLabel(schedule.nextOccurrence)}</div>
-              </div>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button
-                  style={{ ...S.postBtn, opacity: postMutation.isPending ? 0.55 : 1 }}
-                  onClick={() => postMutation.mutate(schedule.id)}
-                  disabled={postMutation.isPending || !schedule.isActive}
-                  aria-label={`Post ${schedule.name}`}
-                  title={`Post ${schedule.name} on ${schedule.nextOccurrence}`}
-                >
-                  <Send size={13} />
-                  Post
-                </button>
-                <label style={{ ...S.meta, display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <input
-                    type="checkbox"
-                    checked={schedule.isActive}
-                    onChange={(e) => updateMutation.mutate({
-                      id: schedule.id,
-                      payload: { isActive: e.target.checked },
-                    })}
-                  />
-                  Active
-                </label>
-                <button
-                  style={S.iconBtn}
-                  onClick={() => deleteMutation.mutate(schedule.id)}
-                  aria-label={`Delete ${schedule.name}`}
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {postMutation.error && (
             <div style={{ padding: '10px 16px', color: '#7A1F2B', fontSize: 12.5 }}>
               {(postMutation.error as Error).message}
+            </div>
+          )}
+          {skipMutation.error && (
+            <div style={{ padding: '10px 16px', color: '#7A1F2B', fontSize: 12.5 }}>
+              {(skipMutation.error as Error).message}
+            </div>
+          )}
+          {updateMutation.error && (
+            <div style={{ padding: '10px 16px', color: '#7A1F2B', fontSize: 12.5 }}>
+              {(updateMutation.error as Error).message}
             </div>
           )}
         </div>
