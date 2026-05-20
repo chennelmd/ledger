@@ -5,6 +5,7 @@ import type { Account } from '../../db/schema.js';
 
 type Category = { id: string; name: string };
 type CategoryGroup = { id: string; name: string; isIncome: boolean; categories: Category[] };
+type AmountType = 'payment' | 'deposit';
 
 type Schedule = {
   id: string;
@@ -27,6 +28,7 @@ type EditScheduleForm = {
   accountId: string;
   categoryId: string;
   amount: string;
+  amountType: AmountType;
   nextOccurrence: string;
   frequency: string;
   notes: string;
@@ -140,6 +142,41 @@ function frequencyFromRrule(rrule: string) {
   return `${freq}:${interval}`;
 }
 
+function amountCentsFor(amount: string, amountType: AmountType) {
+  const cents = Math.round(Math.abs(parseFloat(amount || '0')) * 100);
+  return amountType === 'deposit' ? cents : -cents;
+}
+
+function amountTypeFromCents(cents: number): AmountType {
+  return cents >= 0 ? 'deposit' : 'payment';
+}
+
+function isMonthlyCadence(frequency: string) {
+  return frequency.startsWith('MONTHLY:');
+}
+
+function dayOfMonth(date: string) {
+  return Number(date.slice(8, 10));
+}
+
+function withDayOfMonth(date: string, day: number) {
+  const [year, month] = date.split('-').map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  const safeDay = Math.min(day, lastDay);
+  return `${year}-${String(month).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}`;
+}
+
+function ordinal(day: number) {
+  const suffix = day % 10 === 1 && day !== 11
+    ? 'st'
+    : day % 10 === 2 && day !== 12
+      ? 'nd'
+      : day % 10 === 3 && day !== 13
+        ? 'rd'
+        : 'th';
+  return `${day}${suffix}`;
+}
+
 const S = {
   topBar: {
     display: 'flex',
@@ -238,6 +275,27 @@ const S = {
     cursor: 'pointer',
     fontFamily: 'inherit',
   },
+  signedAmount: {
+    display: 'grid',
+    gridTemplateColumns: '34px minmax(0, 1fr)',
+    gap: 6,
+    alignItems: 'center',
+  },
+  signBtn: {
+    height: 35,
+    width: 34,
+    border: '1px solid #E7DFD0',
+    background: '#FFFEF9',
+    color: '#7A1F2B',
+    cursor: 'pointer',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 15,
+  },
+  signBtnDeposit: {
+    color: '#2D5016',
+    background: '#F3F7ED',
+    borderColor: '#C8D8B8',
+  },
   table: {
     background: '#FBF8F1',
     border: '1px solid #E7DFD0',
@@ -315,6 +373,7 @@ export function SchedulesPage() {
   const [accountId, setAccountId] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [amount, setAmount] = useState('');
+  const [amountType, setAmountType] = useState<AmountType>('payment');
   const [startDate, setStartDate] = useState(today());
   const [frequency, setFrequency] = useState('MONTHLY:1');
   const [notes, setNotes] = useState('');
@@ -328,13 +387,14 @@ export function SchedulesPage() {
   const { data: accounts } = useQuery({ queryKey: ['accounts'], queryFn: fetchAccounts });
   const { data: groups } = useQuery({ queryKey: ['categories'], queryFn: fetchCategories });
 
-  const expenseGroups = groups?.filter((group) => !group.isIncome) ?? [];
+  const categoryGroups = groups ?? [];
 
   const createMutation = useMutation({
     mutationFn: postSchedule,
     onSuccess: () => {
       setName('');
       setAmount('');
+      setAmountType('payment');
       setNotes('');
       setShowAdd(false);
       qc.invalidateQueries({ queryKey: ['schedules'] });
@@ -385,6 +445,7 @@ export function SchedulesPage() {
       accountId: schedule.accountId,
       categoryId: schedule.categoryId ?? '',
       amount: (Math.abs(schedule.amountCents) / 100).toFixed(2),
+      amountType: amountTypeFromCents(schedule.amountCents),
       nextOccurrence: schedule.nextOccurrence,
       frequency: frequencyFromRrule(schedule.rrule),
       notes: schedule.notes ?? '',
@@ -399,14 +460,13 @@ export function SchedulesPage() {
 
   function saveEdit(id: string) {
     if (!editForm) return;
-    const cents = Math.round(Math.abs(parseFloat(editForm.amount || '0')) * 100);
     updateMutation.mutate({
       id,
       payload: {
         name: editForm.name.trim(),
         accountId: editForm.accountId,
         categoryId: editForm.categoryId,
-        amountCents: -cents,
+        amountCents: amountCentsFor(editForm.amount, editForm.amountType),
         rrule: rruleFor(editForm.nextOccurrence, editForm.frequency),
         nextOccurrence: editForm.nextOccurrence,
         notes: editForm.notes.trim() || null,
@@ -419,12 +479,11 @@ export function SchedulesPage() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const cents = Math.round(Math.abs(parseFloat(amount || '0')) * 100);
     createMutation.mutate({
       name: name.trim(),
       accountId,
       categoryId,
-      amountCents: -cents,
+      amountCents: amountCentsFor(amount, amountType),
       rrule: rruleFor(startDate, frequency),
       nextOccurrence: startDate,
       notes: notes.trim() || null,
@@ -477,17 +536,28 @@ export function SchedulesPage() {
             </div>
             <div>
               <label style={S.label} htmlFor="schedule-amount">Amount</label>
-              <input
-                id="schedule-amount"
-                style={{ ...S.input, ...S.mono }}
-                type="number"
-                step="0.01"
-                min="0.01"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                required
-              />
+              <div style={S.signedAmount}>
+                <button
+                  type="button"
+                  style={{ ...S.signBtn, ...(amountType === 'deposit' ? S.signBtnDeposit : {}) }}
+                  onClick={() => setAmountType(amountType === 'deposit' ? 'payment' : 'deposit')}
+                  aria-label={amountType === 'deposit' ? 'Scheduled deposit' : 'Scheduled payment'}
+                  title={amountType === 'deposit' ? 'Deposit' : 'Payment'}
+                >
+                  {amountType === 'deposit' ? '+' : '-'}
+                </button>
+                <input
+                  id="schedule-amount"
+                  style={{ ...S.input, ...S.mono }}
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  required
+                />
+              </div>
             </div>
             <div>
               <label style={S.label} htmlFor="schedule-frequency">Repeats</label>
@@ -500,6 +570,7 @@ export function SchedulesPage() {
                 <option value="WEEKLY:1">Weekly</option>
                 <option value="WEEKLY:2">Every 2 weeks</option>
                 <option value="MONTHLY:1">Monthly</option>
+                <option value="MONTHLY:3">Quarterly</option>
                 <option value="YEARLY:1">Yearly</option>
               </select>
             </div>
@@ -517,6 +588,21 @@ export function SchedulesPage() {
                 required
               />
             </div>
+            {isMonthlyCadence(frequency) && (
+              <div>
+                <label style={S.label} htmlFor="schedule-day">Day</label>
+                <select
+                  id="schedule-day"
+                  style={S.select}
+                  value={dayOfMonth(startDate)}
+                  onChange={(e) => setStartDate(withDayOfMonth(startDate, Number(e.target.value)))}
+                >
+                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                    <option key={day} value={day}>{ordinal(day)}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label style={S.label} htmlFor="schedule-category">Category</label>
               <select
@@ -527,7 +613,7 @@ export function SchedulesPage() {
                 required
               >
                 <option value="">Select</option>
-                {expenseGroups.map((group) => (
+                {categoryGroups.map((group) => (
                   <optgroup key={group.id} label={group.name}>
                     {group.categories.map((cat) => (
                       <option key={cat.id} value={cat.id}>{cat.name}</option>
@@ -609,15 +695,29 @@ export function SchedulesPage() {
                     </div>
                     <div>
                       <label style={S.label} htmlFor={`edit-schedule-amount-${schedule.id}`}>Amount</label>
-                      <input
-                        id={`edit-schedule-amount-${schedule.id}`}
-                        style={{ ...S.input, ...S.mono }}
-                        type="number"
-                        step="0.01"
-                        min="0.01"
-                        value={editForm.amount}
-                        onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })}
-                      />
+                      <div style={S.signedAmount}>
+                        <button
+                          type="button"
+                          style={{ ...S.signBtn, ...(editForm.amountType === 'deposit' ? S.signBtnDeposit : {}) }}
+                          onClick={() => setEditForm({
+                            ...editForm,
+                            amountType: editForm.amountType === 'deposit' ? 'payment' : 'deposit',
+                          })}
+                          aria-label={editForm.amountType === 'deposit' ? 'Scheduled deposit' : 'Scheduled payment'}
+                          title={editForm.amountType === 'deposit' ? 'Deposit' : 'Payment'}
+                        >
+                          {editForm.amountType === 'deposit' ? '+' : '-'}
+                        </button>
+                        <input
+                          id={`edit-schedule-amount-${schedule.id}`}
+                          style={{ ...S.input, ...S.mono }}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={editForm.amount}
+                          onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })}
+                        />
+                      </div>
                     </div>
                     <div>
                       <label style={S.label} htmlFor={`edit-schedule-frequency-${schedule.id}`}>Repeats</label>
@@ -630,6 +730,7 @@ export function SchedulesPage() {
                         <option value="WEEKLY:1">Weekly</option>
                         <option value="WEEKLY:2">Every 2 weeks</option>
                         <option value="MONTHLY:1">Monthly</option>
+                        <option value="MONTHLY:3">Quarterly</option>
                         <option value="YEARLY:1">Yearly</option>
                       </select>
                     </div>
@@ -646,6 +747,24 @@ export function SchedulesPage() {
                         onChange={(e) => setEditForm({ ...editForm, nextOccurrence: e.target.value })}
                       />
                     </div>
+                    {isMonthlyCadence(editForm.frequency) && (
+                      <div>
+                        <label style={S.label} htmlFor={`edit-schedule-day-${schedule.id}`}>Day</label>
+                        <select
+                          id={`edit-schedule-day-${schedule.id}`}
+                          style={S.select}
+                          value={dayOfMonth(editForm.nextOccurrence)}
+                          onChange={(e) => setEditForm({
+                            ...editForm,
+                            nextOccurrence: withDayOfMonth(editForm.nextOccurrence, Number(e.target.value)),
+                          })}
+                        >
+                          {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                            <option key={day} value={day}>{ordinal(day)}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div>
                       <label style={S.label} htmlFor={`edit-schedule-category-${schedule.id}`}>Category</label>
                       <select
@@ -655,7 +774,7 @@ export function SchedulesPage() {
                         onChange={(e) => setEditForm({ ...editForm, categoryId: e.target.value })}
                       >
                         <option value="">Select</option>
-                        {expenseGroups.map((group) => (
+                        {categoryGroups.map((group) => (
                           <optgroup key={group.id} label={group.name}>
                             {group.categories.map((cat) => (
                               <option key={cat.id} value={cat.id}>{cat.name}</option>
