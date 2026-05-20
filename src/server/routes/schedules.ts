@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, lte } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import rrulePkg from 'rrule';
 import { db, schema } from '../../db/client.js';
@@ -42,7 +42,7 @@ function advanceScheduleFields(rruleText: string, occurrenceDate: string, now: s
   return fields;
 }
 
-// GET /api/schedules?days=30 — active schedules with upcoming occurrences
+// GET /api/schedules?days=30 — active schedules due within the requested window
 schedulesRouter.get('/', async (c) => {
   const days = Math.min(Math.max(Number(c.req.query('days') ?? 30), 1), 365);
   const start = startOfToday();
@@ -68,7 +68,11 @@ schedulesRouter.get('/', async (c) => {
     .from(schema.schedules)
     .innerJoin(schema.accounts, eq(schema.schedules.accountId, schema.accounts.id))
     .leftJoin(schema.categories, eq(schema.schedules.categoryId, schema.categories.id))
-    .where(isNull(schema.schedules.deletedAt))
+    .where(and(
+      isNull(schema.schedules.deletedAt),
+      eq(schema.schedules.isActive, true),
+      lte(schema.schedules.nextOccurrence, toDateOnly(end)),
+    ))
     .orderBy(schema.schedules.nextOccurrence);
 
   const enriched = rows.map((row) => ({

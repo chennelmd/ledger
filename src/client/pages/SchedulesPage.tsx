@@ -23,7 +23,7 @@ type Schedule = {
 };
 
 async function fetchSchedules(): Promise<Schedule[]> {
-  const res = await fetch('/api/schedules');
+  const res = await fetch('/api/schedules?days=7');
   if (!res.ok) throw new Error('failed to fetch schedules');
   return res.json();
 }
