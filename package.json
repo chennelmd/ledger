@@ -9,6 +9,7 @@
     "dev:client": "vite --host 0.0.0.0",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist/server/index.js",
+    "db:backup": "node scripts/db-backup.mjs",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit"
