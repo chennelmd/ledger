@@ -6,6 +6,7 @@ import type { Account } from '../../db/schema.js';
 type Category = { id: string; name: string };
 type CategoryGroup = { id: string; name: string; isIncome: boolean; categories: Category[] };
 type AmountType = 'payment' | 'deposit';
+type ScheduleMode = AmountType | 'transfer';
 type MonthDay = string;
 
 type Schedule = {
@@ -15,6 +16,8 @@ type Schedule = {
   accountName: string;
   categoryId: string | null;
   categoryName: string | null;
+  transferAccountId: string | null;
+  transferAccountName: string | null;
   amountCents: number;
   rrule: string;
   nextOccurrence: string;
@@ -28,8 +31,9 @@ type EditScheduleForm = {
   name: string;
   accountId: string;
   categoryId: string;
+  transferAccountId: string;
   amount: string;
-  amountType: AmountType;
+  mode: ScheduleMode;
   nextOccurrence: string;
   frequency: string;
   monthDays: MonthDay[];
@@ -165,8 +169,13 @@ function amountCentsFor(amount: string, amountType: AmountType) {
   return amountType === 'deposit' ? cents : -cents;
 }
 
-function amountTypeFromCents(cents: number): AmountType {
-  return cents >= 0 ? 'deposit' : 'payment';
+function amountCentsForSchedule(amount: string, mode: ScheduleMode) {
+  return mode === 'transfer' ? -Math.round(Math.abs(parseFloat(amount || '0')) * 100) : amountCentsFor(amount, mode);
+}
+
+function modeFromSchedule(schedule: Schedule): ScheduleMode {
+  if (schedule.transferAccountId) return 'transfer';
+  return schedule.amountCents >= 0 ? 'deposit' : 'payment';
 }
 
 function isMonthlyCadence(frequency: string) {
@@ -296,6 +305,24 @@ const S = {
     cursor: 'pointer',
     fontFamily: 'inherit',
   },
+  toggleGroup: {
+    display: 'flex',
+    border: '1px solid #E7DFD0',
+    overflow: 'hidden',
+  },
+  toggleBtn: (active: boolean) => ({
+    flex: 1,
+    padding: '8px 0',
+    fontSize: 12,
+    fontWeight: active ? 600 : 400,
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase' as const,
+    background: active ? '#1C1917' : '#FFFEF9',
+    color: active ? '#FBF8F1' : '#78716C',
+    border: 'none',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  }),
   signedAmount: {
     display: 'grid',
     gridTemplateColumns: '34px minmax(0, 1fr)',
@@ -423,8 +450,9 @@ export function SchedulesPage() {
   const [name, setName] = useState('');
   const [accountId, setAccountId] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [transferAccountId, setTransferAccountId] = useState('');
   const [amount, setAmount] = useState('');
-  const [amountType, setAmountType] = useState<AmountType>('payment');
+  const [mode, setMode] = useState<ScheduleMode>('payment');
   const [startDate, setStartDate] = useState(today());
   const [frequency, setFrequency] = useState('MONTHLY:1');
   const [monthDays, setMonthDays] = useState<MonthDay[]>([String(dayOfMonth(today()))]);
@@ -447,7 +475,8 @@ export function SchedulesPage() {
     onSuccess: () => {
       setName('');
       setAmount('');
-      setAmountType('payment');
+      setMode('payment');
+      setTransferAccountId('');
       const defaultDay = String(dayOfMonth(today()));
       setMonthDays([defaultDay]);
       setPendingMonthDay(defaultDay);
@@ -500,8 +529,9 @@ export function SchedulesPage() {
       name: schedule.name,
       accountId: schedule.accountId,
       categoryId: schedule.categoryId ?? '',
+      transferAccountId: schedule.transferAccountId ?? '',
       amount: (Math.abs(schedule.amountCents) / 100).toFixed(2),
-      amountType: amountTypeFromCents(schedule.amountCents),
+      mode: modeFromSchedule(schedule),
       nextOccurrence: schedule.nextOccurrence,
       frequency: frequencyFromRrule(schedule.rrule),
       monthDays: monthDaysFromRrule(schedule.rrule, schedule.nextOccurrence),
@@ -523,8 +553,9 @@ export function SchedulesPage() {
       payload: {
         name: editForm.name.trim(),
         accountId: editForm.accountId,
-        categoryId: editForm.categoryId,
-        amountCents: amountCentsFor(editForm.amount, editForm.amountType),
+        categoryId: editForm.mode === 'transfer' ? null : editForm.categoryId,
+        transferAccountId: editForm.mode === 'transfer' ? editForm.transferAccountId : null,
+        amountCents: amountCentsForSchedule(editForm.amount, editForm.mode),
         rrule: rruleFor(editForm.nextOccurrence, editForm.frequency, editForm.monthDays),
         nextOccurrence: editForm.nextOccurrence,
         notes: editForm.notes.trim() || null,
@@ -540,8 +571,9 @@ export function SchedulesPage() {
     createMutation.mutate({
       name: name.trim(),
       accountId,
-      categoryId,
-      amountCents: amountCentsFor(amount, amountType),
+      categoryId: mode === 'transfer' ? null : categoryId,
+      transferAccountId: mode === 'transfer' ? transferAccountId : null,
+      amountCents: amountCentsForSchedule(amount, mode),
       rrule: rruleFor(startDate, frequency, monthDays),
       nextOccurrence: startDate,
       notes: notes.trim() || null,
@@ -633,7 +665,10 @@ export function SchedulesPage() {
                 id="schedule-account"
                 style={S.select}
                 value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
+                onChange={(e) => {
+                  setAccountId(e.target.value);
+                  if (transferAccountId === e.target.value) setTransferAccountId('');
+                }}
                 required
               >
                 <option value="">Select</option>
@@ -643,16 +678,32 @@ export function SchedulesPage() {
               </select>
             </div>
             <div>
+              <label style={S.label}>Type</label>
+              <div style={S.toggleGroup}>
+                <button type="button" style={S.toggleBtn(mode === 'payment')} onClick={() => setMode('payment')}>
+                  Payment
+                </button>
+                <button type="button" style={S.toggleBtn(mode === 'deposit')} onClick={() => setMode('deposit')}>
+                  Deposit
+                </button>
+                <button type="button" style={S.toggleBtn(mode === 'transfer')} onClick={() => setMode('transfer')}>
+                  Transfer
+                </button>
+              </div>
+            </div>
+            <div>
               <label style={S.label} htmlFor="schedule-amount">Amount</label>
               <div style={S.signedAmount}>
                 <button
                   type="button"
-                  style={{ ...S.signBtn, ...(amountType === 'deposit' ? S.signBtnDeposit : {}) }}
-                  onClick={() => setAmountType(amountType === 'deposit' ? 'payment' : 'deposit')}
-                  aria-label={amountType === 'deposit' ? 'Scheduled deposit' : 'Scheduled payment'}
-                  title={amountType === 'deposit' ? 'Deposit' : 'Payment'}
+                  style={{ ...S.signBtn, ...(mode === 'deposit' ? S.signBtnDeposit : {}) }}
+                  onClick={() => {
+                    if (mode !== 'transfer') setMode(mode === 'deposit' ? 'payment' : 'deposit');
+                  }}
+                  aria-label={mode === 'deposit' ? 'Scheduled deposit' : mode === 'transfer' ? 'Scheduled transfer' : 'Scheduled payment'}
+                  title={mode === 'deposit' ? 'Deposit' : mode === 'transfer' ? 'Transfer' : 'Payment'}
                 >
-                  {amountType === 'deposit' ? '+' : '-'}
+                  {mode === 'deposit' ? '+' : '-'}
                 </button>
                 <input
                   id="schedule-amount"
@@ -733,23 +784,43 @@ export function SchedulesPage() {
               </div>
             )}
             <div>
-              <label style={S.label} htmlFor="schedule-category">Category</label>
-              <select
-                id="schedule-category"
-                style={S.select}
-                value={categoryId}
-                onChange={(e) => setCategoryId(e.target.value)}
-                required
-              >
-                <option value="">Select</option>
-                {categoryGroups.map((group) => (
-                  <optgroup key={group.id} label={group.name}>
-                    {group.categories.map((cat) => (
-                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+              {mode === 'transfer' ? (
+                <>
+                  <label style={S.label} htmlFor="schedule-transfer-account">To account</label>
+                  <select
+                    id="schedule-transfer-account"
+                    style={S.select}
+                    value={transferAccountId}
+                    onChange={(e) => setTransferAccountId(e.target.value)}
+                    required
+                  >
+                    <option value="">Select</option>
+                    {accounts?.filter((account) => account.id !== accountId).map((account) => (
+                      <option key={account.id} value={account.id}>{account.name}</option>
                     ))}
-                  </optgroup>
-                ))}
-              </select>
+                  </select>
+                </>
+              ) : (
+                <>
+                  <label style={S.label} htmlFor="schedule-category">Category</label>
+                  <select
+                    id="schedule-category"
+                    style={S.select}
+                    value={categoryId}
+                    onChange={(e) => setCategoryId(e.target.value)}
+                    required
+                  >
+                    <option value="">Select</option>
+                    {categoryGroups.map((group) => (
+                      <optgroup key={group.id} label={group.name}>
+                        {group.categories.map((cat) => (
+                          <option key={cat.id} value={cat.id}>{cat.name}</option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </>
+              )}
             </div>
             <div>
               <label style={S.label} htmlFor="schedule-notes">Notes</label>
@@ -815,7 +886,11 @@ export function SchedulesPage() {
                         id={`edit-schedule-account-${schedule.id}`}
                         style={S.select}
                         value={editForm.accountId}
-                        onChange={(e) => setEditForm({ ...editForm, accountId: e.target.value })}
+                        onChange={(e) => setEditForm({
+                          ...editForm,
+                          accountId: e.target.value,
+                          transferAccountId: editForm.transferAccountId === e.target.value ? '' : editForm.transferAccountId,
+                        })}
                       >
                         {accounts?.filter((account) => account.isOnBudget).map((account) => (
                           <option key={account.id} value={account.id}>{account.name}</option>
@@ -823,19 +898,46 @@ export function SchedulesPage() {
                       </select>
                     </div>
                     <div>
+                      <label style={S.label}>Type</label>
+                      <div style={S.toggleGroup}>
+                        <button
+                          type="button"
+                          style={S.toggleBtn(editForm.mode === 'payment')}
+                          onClick={() => setEditForm({ ...editForm, mode: 'payment' })}
+                        >
+                          Payment
+                        </button>
+                        <button
+                          type="button"
+                          style={S.toggleBtn(editForm.mode === 'deposit')}
+                          onClick={() => setEditForm({ ...editForm, mode: 'deposit' })}
+                        >
+                          Deposit
+                        </button>
+                        <button
+                          type="button"
+                          style={S.toggleBtn(editForm.mode === 'transfer')}
+                          onClick={() => setEditForm({ ...editForm, mode: 'transfer' })}
+                        >
+                          Transfer
+                        </button>
+                      </div>
+                    </div>
+                    <div>
                       <label style={S.label} htmlFor={`edit-schedule-amount-${schedule.id}`}>Amount</label>
                       <div style={S.signedAmount}>
                         <button
                           type="button"
-                          style={{ ...S.signBtn, ...(editForm.amountType === 'deposit' ? S.signBtnDeposit : {}) }}
+                          style={{ ...S.signBtn, ...(editForm.mode === 'deposit' ? S.signBtnDeposit : {}) }}
                           onClick={() => setEditForm({
                             ...editForm,
-                            amountType: editForm.amountType === 'deposit' ? 'payment' : 'deposit',
+                            mode: editForm.mode === 'deposit' ? 'payment' : 'deposit',
                           })}
-                          aria-label={editForm.amountType === 'deposit' ? 'Scheduled deposit' : 'Scheduled payment'}
-                          title={editForm.amountType === 'deposit' ? 'Deposit' : 'Payment'}
+                          disabled={editForm.mode === 'transfer'}
+                          aria-label={editForm.mode === 'deposit' ? 'Scheduled deposit' : editForm.mode === 'transfer' ? 'Scheduled transfer' : 'Scheduled payment'}
+                          title={editForm.mode === 'deposit' ? 'Deposit' : editForm.mode === 'transfer' ? 'Transfer' : 'Payment'}
                         >
-                          {editForm.amountType === 'deposit' ? '+' : '-'}
+                          {editForm.mode === 'deposit' ? '+' : '-'}
                         </button>
                         <input
                           id={`edit-schedule-amount-${schedule.id}`}
@@ -913,22 +1015,41 @@ export function SchedulesPage() {
                       </div>
                     )}
                     <div>
-                      <label style={S.label} htmlFor={`edit-schedule-category-${schedule.id}`}>Category</label>
-                      <select
-                        id={`edit-schedule-category-${schedule.id}`}
-                        style={S.select}
-                        value={editForm.categoryId}
-                        onChange={(e) => setEditForm({ ...editForm, categoryId: e.target.value })}
-                      >
-                        <option value="">Select</option>
-                        {categoryGroups.map((group) => (
-                          <optgroup key={group.id} label={group.name}>
-                            {group.categories.map((cat) => (
-                              <option key={cat.id} value={cat.id}>{cat.name}</option>
+                      {editForm.mode === 'transfer' ? (
+                        <>
+                          <label style={S.label} htmlFor={`edit-schedule-transfer-account-${schedule.id}`}>To account</label>
+                          <select
+                            id={`edit-schedule-transfer-account-${schedule.id}`}
+                            style={S.select}
+                            value={editForm.transferAccountId}
+                            onChange={(e) => setEditForm({ ...editForm, transferAccountId: e.target.value })}
+                          >
+                            <option value="">Select</option>
+                            {accounts?.filter((account) => account.id !== editForm.accountId).map((account) => (
+                              <option key={account.id} value={account.id}>{account.name}</option>
                             ))}
-                          </optgroup>
-                        ))}
-                      </select>
+                          </select>
+                        </>
+                      ) : (
+                        <>
+                          <label style={S.label} htmlFor={`edit-schedule-category-${schedule.id}`}>Category</label>
+                          <select
+                            id={`edit-schedule-category-${schedule.id}`}
+                            style={S.select}
+                            value={editForm.categoryId}
+                            onChange={(e) => setEditForm({ ...editForm, categoryId: e.target.value })}
+                          >
+                            <option value="">Select</option>
+                            {categoryGroups.map((group) => (
+                              <optgroup key={group.id} label={group.name}>
+                                {group.categories.map((cat) => (
+                                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </select>
+                        </>
+                      )}
                     </div>
                     <div>
                       <label style={S.label} htmlFor={`edit-schedule-notes-${schedule.id}`}>Notes</label>
@@ -952,7 +1073,7 @@ export function SchedulesPage() {
                         style={S.submit}
                         type="button"
                         onClick={() => saveEdit(schedule.id)}
-                        disabled={updateMutation.isPending || !editForm.name.trim() || !editForm.accountId || !editForm.categoryId}
+                        disabled={updateMutation.isPending || !editForm.name.trim() || !editForm.accountId || (editForm.mode === 'transfer' ? !editForm.transferAccountId : !editForm.categoryId)}
                       >
                         Save
                       </button>
@@ -978,7 +1099,11 @@ export function SchedulesPage() {
                   <div style={S.name}>{schedule.name}</div>
                   <div style={S.meta}>
                     {schedule.accountName}
-                    {schedule.categoryName ? ` · ${schedule.categoryName}` : ''}
+                    {schedule.transferAccountName
+                      ? ` -> ${schedule.transferAccountName}`
+                      : schedule.categoryName
+                        ? ` · ${schedule.categoryName}`
+                        : ''}
                   </div>
                 </div>
                 <div style={S.mono}>{fmt$(schedule.amountCents)}</div>

@@ -130,16 +130,23 @@ export type TransferUpdateInput = z.infer<typeof TransferUpdateSchema>;
 
 // ─── Schedules ───────────────────────────────────────────────────────────────
 
-export const NewScheduleSchema = z.object({
+export const NewScheduleFieldsSchema = z.object({
   name: z.string().min(1).max(120),
   accountId: z.string().min(1),
-  categoryId: z.string().min(1),
+  categoryId: z.string().min(1).nullable().optional(),
+  transferAccountId: z.string().min(1).nullable().optional(),
   amountCents: z.number().int(),
   rrule: z.string().min(1),
   nextOccurrence: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   isActive: z.boolean().default(true),
   autoPost: z.boolean().default(false),
   notes: z.string().nullable().optional(),
+});
+
+export const NewScheduleSchema = NewScheduleFieldsSchema.refine((data) => Boolean(data.categoryId) !== Boolean(data.transferAccountId), {
+  message: 'schedule requires either a category or transfer account',
+}).refine((data) => !data.transferAccountId || data.accountId !== data.transferAccountId, {
+  message: 'cannot transfer to the same account',
 });
 
 export type NewScheduleInput = z.infer<typeof NewScheduleSchema>;

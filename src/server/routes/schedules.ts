@@ -1,12 +1,14 @@
 import { Hono } from 'hono';
 import { and, eq, isNull, lte } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
 import { nanoid } from 'nanoid';
 import rrulePkg from 'rrule';
 import { db, schema } from '../../db/client.js';
-import { NewScheduleSchema } from '../../shared/schemas.js';
+import { NewScheduleFieldsSchema, NewScheduleSchema } from '../../shared/schemas.js';
 
 export const schedulesRouter = new Hono();
 const { rrulestr } = rrulePkg;
+const transferAccounts = alias(schema.accounts, 'schedule_transfer_accounts');
 
 function toDateOnly(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -62,6 +64,8 @@ schedulesRouter.get('/', async (c) => {
       accountName: schema.accounts.name,
       categoryId: schema.schedules.categoryId,
       categoryName: schema.categories.name,
+      transferAccountId: schema.schedules.transferAccountId,
+      transferAccountName: transferAccounts.name,
       amountCents: schema.schedules.amountCents,
       rrule: schema.schedules.rrule,
       nextOccurrence: schema.schedules.nextOccurrence,
@@ -73,6 +77,7 @@ schedulesRouter.get('/', async (c) => {
     .from(schema.schedules)
     .innerJoin(schema.accounts, eq(schema.schedules.accountId, schema.accounts.id))
     .leftJoin(schema.categories, eq(schema.schedules.categoryId, schema.categories.id))
+    .leftJoin(transferAccounts, eq(schema.schedules.transferAccountId, transferAccounts.id))
     .where(and(...conditions))
     .orderBy(schema.schedules.nextOccurrence);
 
@@ -133,6 +138,74 @@ schedulesRouter.post('/:id/post', async (c) => {
       .get();
 
     if (existingPost) return { error: 'schedule occurrence is already posted' };
+
+    if (schedule.transferAccountId) {
+      if (schedule.accountId === schedule.transferAccountId) {
+        return { error: 'cannot transfer to the same account' };
+      }
+
+      const transferAmountCents = Math.abs(schedule.amountCents);
+      const transferId = nanoid();
+
+      const fromTxn = tx
+        .insert(schema.transactions)
+        .values({
+          id: nanoid(),
+          accountId: schedule.accountId,
+          date: schedule.nextOccurrence,
+          amountCents: -transferAmountCents,
+          notes: schedule.notes ?? null,
+          cleared: false,
+          transferId,
+          scheduleId: schedule.id,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning()
+        .get();
+
+      tx.insert(schema.transactionSplits).values({
+        id: nanoid(),
+        transactionId: fromTxn.id,
+        amountCents: -transferAmountCents,
+        transferAccountId: schedule.transferAccountId,
+        sortOrder: 0,
+      }).run();
+
+      const toTxn = tx
+        .insert(schema.transactions)
+        .values({
+          id: nanoid(),
+          accountId: schedule.transferAccountId,
+          date: schedule.nextOccurrence,
+          amountCents: transferAmountCents,
+          notes: schedule.notes ?? null,
+          cleared: false,
+          transferId,
+          scheduleId: schedule.id,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning()
+        .get();
+
+      tx.insert(schema.transactionSplits).values({
+        id: nanoid(),
+        transactionId: toTxn.id,
+        amountCents: transferAmountCents,
+        transferAccountId: schedule.accountId,
+        sortOrder: 0,
+      }).run();
+
+      const updatedSchedule = tx
+        .update(schema.schedules)
+        .set(advanceScheduleFields(schedule.rrule, schedule.nextOccurrence, now))
+        .where(eq(schema.schedules.id, schedule.id))
+        .returning()
+        .get();
+
+      return { transaction: fromTxn, transferTransaction: toTxn, schedule: updatedSchedule };
+    }
 
     let payeeId: string | null = schedule.payeeId ?? null;
     if (!payeeId) {
@@ -221,7 +294,7 @@ schedulesRouter.post('/:id/skip', async (c) => {
 schedulesRouter.patch('/:id', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json();
-  const parsed = NewScheduleSchema.partial().safeParse(body);
+  const parsed = NewScheduleFieldsSchema.partial().safeParse(body);
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
 
   const patch = parsed.data;

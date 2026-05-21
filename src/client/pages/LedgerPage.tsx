@@ -34,6 +34,8 @@ interface ScheduleRow {
   accountName: string | null;
   categoryId: string | null;
   categoryName: string | null;
+  transferAccountId: string | null;
+  transferAccountName: string | null;
   amountCents: number;
   nextOccurrence: string;
   isActive: boolean;
@@ -634,7 +636,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         {schedule.name}
                       </td>
                       <td style={{ ...S.td, color: schedule.notes ? '#78716C' : '#A8A29E', fontSize: 12.5, fontStyle: 'italic' }}>
-                        {schedule.notes ?? schedule.categoryName ?? '—'}
+                        {schedule.notes ?? schedule.categoryName ?? (schedule.transferAccountName ? `Transfer: ${schedule.transferAccountName}` : '—')}
                       </td>
                       <td style={S.td}>
                         <span style={scheduleBadgeStyle}>{scheduleStatus}</span>
