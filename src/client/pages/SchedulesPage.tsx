@@ -305,24 +305,6 @@ const S = {
     cursor: 'pointer',
     fontFamily: 'inherit',
   },
-  toggleGroup: {
-    display: 'flex',
-    border: '1px solid #E7DFD0',
-    overflow: 'hidden',
-  },
-  toggleBtn: (active: boolean) => ({
-    flex: 1,
-    padding: '8px 0',
-    fontSize: 12,
-    fontWeight: active ? 600 : 400,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase' as const,
-    background: active ? '#1C1917' : '#FFFEF9',
-    color: active ? '#FBF8F1' : '#78716C',
-    border: 'none',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  }),
   signedAmount: {
     display: 'grid',
     gridTemplateColumns: '34px minmax(0, 1fr)',
@@ -678,18 +660,17 @@ export function SchedulesPage() {
               </select>
             </div>
             <div>
-              <label style={S.label}>Type</label>
-              <div style={S.toggleGroup}>
-                <button type="button" style={S.toggleBtn(mode === 'payment')} onClick={() => setMode('payment')}>
-                  Payment
-                </button>
-                <button type="button" style={S.toggleBtn(mode === 'deposit')} onClick={() => setMode('deposit')}>
-                  Deposit
-                </button>
-                <button type="button" style={S.toggleBtn(mode === 'transfer')} onClick={() => setMode('transfer')}>
-                  Transfer
-                </button>
-              </div>
+              <label style={S.label} htmlFor="schedule-type">Type</label>
+              <select
+                id="schedule-type"
+                style={S.select}
+                value={mode}
+                onChange={(e) => setMode(e.target.value as ScheduleMode)}
+              >
+                <option value="payment">Payment</option>
+                <option value="deposit">Deposit</option>
+                <option value="transfer">Transfer</option>
+              </select>
             </div>
             <div>
               <label style={S.label} htmlFor="schedule-amount">Amount</label>
@@ -898,30 +879,17 @@ export function SchedulesPage() {
                       </select>
                     </div>
                     <div>
-                      <label style={S.label}>Type</label>
-                      <div style={S.toggleGroup}>
-                        <button
-                          type="button"
-                          style={S.toggleBtn(editForm.mode === 'payment')}
-                          onClick={() => setEditForm({ ...editForm, mode: 'payment' })}
-                        >
-                          Payment
-                        </button>
-                        <button
-                          type="button"
-                          style={S.toggleBtn(editForm.mode === 'deposit')}
-                          onClick={() => setEditForm({ ...editForm, mode: 'deposit' })}
-                        >
-                          Deposit
-                        </button>
-                        <button
-                          type="button"
-                          style={S.toggleBtn(editForm.mode === 'transfer')}
-                          onClick={() => setEditForm({ ...editForm, mode: 'transfer' })}
-                        >
-                          Transfer
-                        </button>
-                      </div>
+                      <label style={S.label} htmlFor={`edit-schedule-type-${schedule.id}`}>Type</label>
+                      <select
+                        id={`edit-schedule-type-${schedule.id}`}
+                        style={S.select}
+                        value={editForm.mode}
+                        onChange={(e) => setEditForm({ ...editForm, mode: e.target.value as ScheduleMode })}
+                      >
+                        <option value="payment">Payment</option>
+                        <option value="deposit">Deposit</option>
+                        <option value="transfer">Transfer</option>
+                      </select>
                     </div>
                     <div>
                       <label style={S.label} htmlFor={`edit-schedule-amount-${schedule.id}`}>Amount</label>
