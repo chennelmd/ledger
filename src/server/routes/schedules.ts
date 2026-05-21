@@ -3,7 +3,7 @@ import { and, eq, isNull, lte } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import { nanoid } from 'nanoid';
 import rrulePkg from 'rrule';
-import { db, schema } from '../../db/client.js';
+import { backupDatabase, db, schema } from '../../db/client.js';
 import { NewScheduleFieldsSchema, NewScheduleSchema } from '../../shared/schemas.js';
 
 export const schedulesRouter = new Hono();
@@ -332,6 +332,7 @@ schedulesRouter.patch('/:id', async (c) => {
 // DELETE /api/schedules/:id — soft delete
 schedulesRouter.delete('/:id', async (c) => {
   const id = c.req.param('id');
+  await backupDatabase('before-schedule-delete');
   await db
     .update(schema.schedules)
     .set({ deletedAt: new Date().toISOString() })
