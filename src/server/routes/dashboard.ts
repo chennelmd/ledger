@@ -120,6 +120,7 @@ dashboardRouter.get('/free-cash', async (c) => {
       categoryId: schema.schedules.categoryId,
       amountCents: schema.schedules.amountCents,
       rrule: schema.schedules.rrule,
+      nextOccurrence: schema.schedules.nextOccurrence,
     })
       .from(schema.schedules)
       .where(and(
@@ -202,7 +203,8 @@ dashboardRouter.get('/free-cash', async (c) => {
 
   for (const schedule of schedules) {
     if (!schedule.categoryId) continue;
-    const dates = occurrencesBetween(schedule.rrule, today, endDate);
+    const dates = occurrencesBetween(schedule.rrule, today, endDate)
+      .filter((date) => date >= schedule.nextOccurrence);
     for (const date of dates) {
       const outflowCents = Math.max(0, -schedule.amountCents);
       if (outflowCents === 0) continue;

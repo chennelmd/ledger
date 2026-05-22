@@ -297,7 +297,7 @@ transactionsRouter.patch('/:id', async (c) => {
           sortOrder: i,
         }).run();
       }
-    } else if (categoryId !== undefined || txnFields.amountCents !== undefined) {
+    } else if (categoryId !== undefined) {
       // Single-split sync. Replace existing category splits so reducing a
       // multi-split transaction back to one row removes the old extra rows.
       tx.delete(schema.transactionSplits)
@@ -314,6 +314,24 @@ transactionsRouter.patch('/:id', async (c) => {
           categoryId,
           sortOrder: 0,
         }).run();
+      }
+    } else if (txnFields.amountCents !== undefined) {
+      const existingSplits = tx
+        .select({
+          id: schema.transactionSplits.id,
+        })
+        .from(schema.transactionSplits)
+        .where(and(
+          eq(schema.transactionSplits.transactionId, id),
+          isNull(schema.transactionSplits.transferAccountId),
+        ))
+        .all();
+
+      if (existingSplits.length === 1) {
+        tx.update(schema.transactionSplits)
+          .set({ amountCents: updated.amountCents })
+          .where(eq(schema.transactionSplits.id, existingSplits[0].id))
+          .run();
       }
     }
 
