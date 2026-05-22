@@ -256,6 +256,10 @@ transactionsRouter.patch('/:id', async (c) => {
   const now = new Date().toISOString();
 
   const result = db.transaction((tx) => {
+    const resizesExistingSingleSplit =
+      txnFields.amountCents !== undefined && categoryId === undefined && !(splits && splits.length > 0);
+    let existingSingleSplitId: string | undefined;
+
     // Upsert payee by name if provided
     let resolvedPayeeId: string | undefined;
     if (payeeName) {
@@ -267,6 +271,34 @@ transactionsRouter.patch('/:id', async (c) => {
 
     const setFields: Record<string, unknown> = { ...txnFields, updatedAt: now };
     if (resolvedPayeeId !== undefined) setFields.payeeId = resolvedPayeeId;
+
+    if (resizesExistingSingleSplit) {
+      const existingTransaction = tx
+        .select({ id: schema.transactions.id })
+        .from(schema.transactions)
+        .where(eq(schema.transactions.id, id))
+        .get();
+      if (!existingTransaction) return null;
+
+      const existingSplits = tx
+        .select({
+          id: schema.transactionSplits.id,
+        })
+        .from(schema.transactionSplits)
+        .where(and(
+          eq(schema.transactionSplits.transactionId, id),
+          isNull(schema.transactionSplits.transferAccountId),
+        ))
+        .all();
+
+      if (existingSplits.length !== 1) {
+        return {
+          error: 'amountCents update without categoryId or splits requires exactly one existing non-transfer split; send the full splits array for split transactions',
+        };
+      }
+
+      existingSingleSplitId = existingSplits[0].id;
+    }
 
     const updated = tx
       .update(schema.transactions)
@@ -315,24 +347,11 @@ transactionsRouter.patch('/:id', async (c) => {
           sortOrder: 0,
         }).run();
       }
-    } else if (txnFields.amountCents !== undefined) {
-      const existingSplits = tx
-        .select({
-          id: schema.transactionSplits.id,
-        })
-        .from(schema.transactionSplits)
-        .where(and(
-          eq(schema.transactionSplits.transactionId, id),
-          isNull(schema.transactionSplits.transferAccountId),
-        ))
-        .all();
-
-      if (existingSplits.length === 1) {
-        tx.update(schema.transactionSplits)
-          .set({ amountCents: updated.amountCents })
-          .where(eq(schema.transactionSplits.id, existingSplits[0].id))
-          .run();
-      }
+    } else if (existingSingleSplitId) {
+      tx.update(schema.transactionSplits)
+        .set({ amountCents: updated.amountCents })
+        .where(eq(schema.transactionSplits.id, existingSingleSplitId))
+        .run();
     }
 
     return updated;
