@@ -91,6 +91,7 @@ export const SplitInputSchema = z.object({
   amountCents: z.number().int(),
   categoryId: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
+  tags: z.array(z.string().min(1).max(50)).optional(),
 });
 
 export const NewTransactionSchema = z.object({
@@ -103,6 +104,7 @@ export const NewTransactionSchema = z.object({
   splits: z.array(SplitInputSchema).optional(),
   notes: z.string().nullable().optional(),
   cleared: z.boolean().default(false),
+  tags: z.array(z.string().min(1).max(50)).optional(),
 });
 
 export type NewTransactionInput = z.infer<typeof NewTransactionSchema>;

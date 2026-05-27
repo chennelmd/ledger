@@ -9,6 +9,7 @@ import { transactionsRouter } from './routes/transactions.js';
 import { budgetRouter } from './routes/budget.js';
 import { dashboardRouter } from './routes/dashboard.js';
 import { schedulesRouter } from './routes/schedules.js';
+import { tagsRouter } from './routes/tags.js';
 
 const app = new Hono();
 
@@ -24,6 +25,7 @@ app.route('/api/transactions', transactionsRouter);
 app.route('/api/budget', budgetRouter);
 app.route('/api/dashboard', dashboardRouter);
 app.route('/api/schedules', schedulesRouter);
+app.route('/api/tags', tagsRouter);
 
 const port = Number(process.env.PORT ?? 3000);
 console.log(`→ Server listening on http://localhost:${port}`);

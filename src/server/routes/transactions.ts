@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../../db/client.js';
@@ -37,6 +37,7 @@ transactionsRouter.get('/', async (c) => {
       reconciled: schema.transactions.reconciled,
       categoryId: schema.transactionSplits.categoryId,
       categoryName: schema.categories.name,
+      splitId: schema.transactionSplits.id,
       splitAmountCents: schema.transactionSplits.amountCents,
       splitNotes: schema.transactionSplits.notes,
       transferId: schema.transactions.transferId,
@@ -53,7 +54,23 @@ transactionsRouter.get('/', async (c) => {
     .orderBy(desc(schema.transactions.date), desc(schema.transactions.createdAt))
     .limit(limit);
 
-  return c.json(rows);
+  // Fetch tags for all returned splits in one query
+  const splitIds = rows.map(r => r.splitId).filter((id): id is string => id !== null);
+  const tagsBySplitId = new Map<string, string[]>();
+  if (splitIds.length > 0) {
+    const tagRows = await db
+      .select({ splitId: schema.splitTags.splitId, tagName: schema.tags.name })
+      .from(schema.splitTags)
+      .innerJoin(schema.tags, eq(schema.splitTags.tagId, schema.tags.id))
+      .where(inArray(schema.splitTags.splitId, splitIds));
+    for (const r of tagRows) {
+      const arr = tagsBySplitId.get(r.splitId) ?? [];
+      arr.push(r.tagName);
+      tagsBySplitId.set(r.splitId, arr);
+    }
+  }
+
+  return c.json(rows.map(r => ({ ...r, tags: r.splitId ? (tagsBySplitId.get(r.splitId) ?? []) : [] })));
 });
 
 // POST /api/transactions — create transaction + optional split, atomic
@@ -70,7 +87,7 @@ transactionsRouter.post('/', async (c) => {
   }
 
   // Normalise to a splits array for the insert loop
-  type SplitRow = { amountCents: number; categoryId: string | null; notes: string | null; sortOrder: number };
+  type SplitRow = { amountCents: number; categoryId: string | null; notes: string | null; sortOrder: number; tags: string[] };
   let splitsToInsert: SplitRow[] = [];
   if (data.splits && data.splits.length > 0) {
     splitsToInsert = data.splits.map((s, i) => ({
@@ -78,9 +95,10 @@ transactionsRouter.post('/', async (c) => {
       categoryId: s.categoryId ?? null,
       notes: s.notes ?? null,
       sortOrder: i,
+      tags: s.tags ?? [],
     }));
   } else if (data.categoryId) {
-    splitsToInsert = [{ amountCents: data.amountCents, categoryId: data.categoryId, notes: null, sortOrder: 0 }];
+    splitsToInsert = [{ amountCents: data.amountCents, categoryId: data.categoryId, notes: null, sortOrder: 0, tags: data.tags ?? [] }];
   }
 
   const result = db.transaction((tx) => {
@@ -113,16 +131,24 @@ transactionsRouter.post('/', async (c) => {
       .returning()
       .get();
 
-    // 3. Insert splits
+    // 3. Insert splits (and their tags)
     for (const split of splitsToInsert) {
-      tx.insert(schema.transactionSplits).values({
+      const insertedSplit = tx.insert(schema.transactionSplits).values({
         id: nanoid(),
         transactionId: txn.id,
         amountCents: split.amountCents,
         categoryId: split.categoryId,
         notes: split.notes,
         sortOrder: split.sortOrder,
-      }).run();
+      }).returning().get();
+
+      for (const tagName of split.tags) {
+        const existing = tx.select().from(schema.tags).where(eq(schema.tags.name, tagName)).get();
+        const tagId = existing
+          ? existing.id
+          : tx.insert(schema.tags).values({ id: nanoid(), name: tagName }).returning().get().id;
+        tx.insert(schema.splitTags).values({ splitId: insertedSplit.id, tagId }).run();
+      }
     }
 
     return txn;
@@ -313,21 +339,28 @@ transactionsRouter.patch('/:id', async (c) => {
       const err = validateSplitsSum(splits, updated.amountCents);
       if (err) return { error: err };
 
-      // Replace all non-transfer splits atomically
+      // Replace all non-transfer splits atomically (cascade deletes split_tags for old splits)
       tx.delete(schema.transactionSplits)
         .where(and(
           eq(schema.transactionSplits.transactionId, id),
           isNull(schema.transactionSplits.transferAccountId),
         )).run();
       for (let i = 0; i < splits.length; i++) {
-        tx.insert(schema.transactionSplits).values({
+        const insertedSplit = tx.insert(schema.transactionSplits).values({
           id: nanoid(),
           transactionId: id,
           amountCents: splits[i].amountCents,
           categoryId: splits[i].categoryId ?? null,
           notes: splits[i].notes ?? null,
           sortOrder: i,
-        }).run();
+        }).returning().get();
+        for (const tagName of splits[i].tags ?? []) {
+          const existing = tx.select().from(schema.tags).where(eq(schema.tags.name, tagName)).get();
+          const tagId = existing
+            ? existing.id
+            : tx.insert(schema.tags).values({ id: nanoid(), name: tagName }).returning().get().id;
+          tx.insert(schema.splitTags).values({ splitId: insertedSplit.id, tagId }).run();
+        }
       }
     } else if (categoryId !== undefined) {
       // Single-split sync. Replace existing category splits so reducing a
