@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Target } from 'lucide-react';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -11,6 +11,9 @@ interface BudgetCategory {
   assignedCents: number;
   activityCents: number;
   availableCents: number;
+  goalType: 'target_by_date' | 'monthly_minimum' | 'monthly_savings' | null;
+  goalAmountCents: number | null;
+  goalDate: string | null;
 }
 
 interface BudgetGroup {
@@ -536,6 +539,266 @@ function GroupHeader({ group, months, gridCols }: {
   );
 }
 
+// ─── Goal helpers ────────────────────────────────────────────────────────────
+
+const GOAL_LABELS: Record<string, string> = {
+  target_by_date: 'Target by date',
+  monthly_minimum: 'Monthly minimum',
+  monthly_savings: 'Monthly savings',
+};
+
+function goalRatio(cat: BudgetCategory): number | null {
+  if (!cat.goalType || !cat.goalAmountCents || cat.goalAmountCents <= 0) return null;
+  if (cat.goalType === 'target_by_date') return cat.availableCents / cat.goalAmountCents;
+  // monthly_minimum / monthly_savings: track how much has been assigned this month
+  return cat.assignedCents / cat.goalAmountCents;
+}
+
+// ─── GoalProgressBar ─────────────────────────────────────────────────────────
+// Thin colored bar shown below the Available amount in the primary month column.
+// Clicking opens the goal editor.
+
+function GoalProgressBar({ cat, onEdit }: { cat: BudgetCategory; onEdit: () => void }) {
+  const ratio = goalRatio(cat);
+
+  if (!cat.goalType) {
+    return (
+      <button
+        onClick={onEdit}
+        style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          fontSize: 10, color: '#C5BDB5', letterSpacing: '0.06em',
+          textAlign: 'right', width: '100%', padding: '2px 0 0',
+          fontFamily: 'inherit',
+        }}
+        title="Set a goal for this category"
+      >
+        + goal
+      </button>
+    );
+  }
+
+  const pct    = Math.min(100, Math.max(0, (ratio ?? 0) * 100));
+  const barColor = pct >= 100 ? '#365142' : pct >= 75 ? '#856404' : '#7A1F2B';
+  const label  = cat.goalType === 'target_by_date'
+    ? `${Math.round(pct)}% of ${fmt$(cat.goalAmountCents!)}`
+    : `${fmt$(cat.assignedCents)} of ${fmt$(cat.goalAmountCents!)}/mo`;
+
+  return (
+    <div
+      onClick={onEdit}
+      title={`${GOAL_LABELS[cat.goalType]} · ${label} · click to edit`}
+      style={{ cursor: 'pointer', paddingTop: 4 }}
+    >
+      <div style={{ background: '#EDE7DC', height: 3, borderRadius: 2 }}>
+        <div style={{ background: barColor, height: 3, borderRadius: 2, width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── GoalModal ────────────────────────────────────────────────────────────────
+
+function GoalModal({ cat, onClose }: { cat: BudgetCategory; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [goalType, setGoalType] = useState(cat.goalType ?? '');
+  const [amount, setAmount]     = useState(cat.goalAmountCents ? (cat.goalAmountCents / 100).toFixed(2) : '');
+  const [date, setDate]         = useState(cat.goalDate ?? '');
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const mutation = useMutation({
+    mutationFn: (patch: Record<string, unknown>) => patchCategory(cat.id, patch),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); onClose(); },
+  });
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    mutation.mutate({
+      goalType: goalType || null,
+      goalAmountCents: amount ? Math.round(parseFloat(amount) * 100) : null,
+      goalDate: goalType === 'target_by_date' ? date || null : null,
+    });
+  }
+
+  function handleClear() {
+    mutation.mutate({ goalType: null, goalAmountCents: null, goalDate: null });
+  }
+
+  const MS: Record<string, React.CSSProperties> = {
+    overlay: {
+      position: 'fixed', inset: 0, background: 'rgba(28,25,23,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 50, padding: 24,
+    },
+    modal: {
+      background: '#FFFEF9', border: '1px solid #E7DFD0',
+      width: '100%', maxWidth: 360,
+    },
+    header: {
+      display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+      padding: '20px 24px 0',
+    },
+    title: {
+      fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 500,
+      letterSpacing: '-0.02em', color: '#1C1917', margin: 0,
+    },
+    body:  { padding: '16px 24px 24px' },
+    label: {
+      display: 'block', fontSize: 10.5, fontWeight: 600,
+      letterSpacing: '0.12em', textTransform: 'uppercase' as const,
+      color: '#78716C', marginBottom: 5,
+    },
+    row:   { marginBottom: 14 },
+    input: {
+      width: '100%', boxSizing: 'border-box' as const,
+      border: '1px solid #E7DFD0', background: '#FFFEF9',
+      padding: '8px 10px', fontSize: 13.5, color: '#1C1917',
+      outline: 'none', fontFamily: 'inherit',
+    },
+    footer: {
+      display: 'flex', justifyContent: 'space-between', gap: 8,
+      paddingTop: 16, borderTop: '1px solid #F0EADD', marginTop: 4,
+    },
+    btnClear:  { background: 'none', border: '1px solid #E7DFD0', padding: '7px 14px', fontSize: 12.5, color: '#7A1F2B', cursor: 'pointer', fontFamily: 'inherit' },
+    btnCancel: { background: 'none', border: '1px solid #E7DFD0', padding: '7px 14px', fontSize: 12.5, color: '#78716C', cursor: 'pointer', fontFamily: 'inherit' },
+    btnSave:   { background: '#1C1917', border: 'none', padding: '7px 18px', fontSize: 12.5, color: '#FBF8F1', cursor: 'pointer', fontFamily: 'inherit' },
+    catName:   { fontSize: 12, color: '#78716C', marginBottom: 14 },
+  };
+
+  return (
+    <div style={MS.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={MS.modal}>
+        <div style={MS.header}>
+          <h2 style={MS.title}>
+            <Target size={14} style={{ marginRight: 7, verticalAlign: 'middle', color: '#78716C' }} />
+            Goal
+          </h2>
+        </div>
+        <div style={MS.body}>
+          <div style={MS.catName}>{cat.name}</div>
+          <form onSubmit={handleSubmit}>
+            <div style={MS.row}>
+              <label style={MS.label} htmlFor="goal-type">Goal type</label>
+              <select
+                id="goal-type" style={MS.input} value={goalType}
+                onChange={(e) => setGoalType(e.target.value)}
+              >
+                <option value="">No goal</option>
+                <option value="target_by_date">Target by date — save $X by a date</option>
+                <option value="monthly_savings">Monthly savings — assign $X/month</option>
+                <option value="monthly_minimum">Monthly minimum — spend at least $X/month</option>
+              </select>
+            </div>
+
+            {goalType && (
+              <div style={MS.row}>
+                <label style={MS.label} htmlFor="goal-amount">
+                  {goalType === 'target_by_date' ? 'Target amount' : 'Monthly amount'}
+                </label>
+                <input
+                  id="goal-amount" style={MS.input} type="number"
+                  step="0.01" min="0" value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00" autoFocus
+                />
+              </div>
+            )}
+
+            {goalType === 'target_by_date' && (
+              <div style={MS.row}>
+                <label style={MS.label} htmlFor="goal-date">Target date</label>
+                <input
+                  id="goal-date" style={MS.input} type="date"
+                  value={date} onChange={(e) => setDate(e.target.value)}
+                />
+              </div>
+            )}
+
+            {mutation.isError && (
+              <p style={{ fontSize: 12, color: '#7A1F2B', marginBottom: 10 }}>
+                {(mutation.error as Error).message}
+              </p>
+            )}
+
+            <div style={MS.footer}>
+              <button
+                type="button" style={MS.btnClear}
+                onClick={handleClear} disabled={!cat.goalType || mutation.isPending}
+              >
+                Clear
+              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" style={MS.btnCancel} onClick={onClose}>Cancel</button>
+                <button type="submit" style={MS.btnSave} disabled={mutation.isPending}>
+                  {mutation.isPending ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CategoryRow ──────────────────────────────────────────────────────────────
+// Owns its own goalOpen state so each row manages its modal independently.
+
+function CategoryRow({ cat, group, months, getCatMonth, gridCols }: {
+  cat: BudgetCategory;
+  group: BudgetGroup;
+  months: string[];
+  getCatMonth: (catId: string, mi: number) => BudgetCategory | undefined;
+  gridCols: string;
+}) {
+  const [goalOpen, setGoalOpen] = useState(false);
+
+  return (
+    <>
+      <div
+        style={{ ...budgetGridStyle(gridCols), borderBottom: '1px solid #F0EADD', background: '#FBF8F1', alignItems: 'center', minHeight: 42 }}
+        data-budget-grid-row
+      >
+        <EditableCategoryName cat={cat} />
+        {months.map((m, mi) => {
+          const d      = getCatMonth(cat.id, mi);
+          const avail  = d?.availableCents ?? 0;
+          // Merge goal fields from primary cat (always present) with current-month budget values
+          const merged: BudgetCategory = d ? { ...cat, ...d } : cat;
+          return (
+            <Fragment key={m}>
+              <div style={mi > 0 ? MONTH_SEP : undefined}>
+                <AssignedCell
+                  month={m} categoryId={cat.id}
+                  assignedCents={d?.assignedCents ?? 0}
+                  isIncome={group.isIncome}
+                />
+              </div>
+              <div style={{ ...S.cellMono, ...S.activityCell }}>
+                {(d?.activityCents ?? 0) === 0 ? '—' : fmt$(d!.activityCents)}
+              </div>
+              <div style={{ paddingRight: 10, paddingTop: 6, paddingBottom: mi === 0 && !group.isIncome ? 4 : 6 }}>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: 'tabular-nums', fontSize: 13, textAlign: 'right', ...availStyle(avail) }}>
+                  {fmt$(avail)}
+                </div>
+                {mi === 0 && !group.isIncome && (
+                  <GoalProgressBar cat={merged} onEdit={() => setGoalOpen(true)} />
+                )}
+              </div>
+            </Fragment>
+          );
+        })}
+      </div>
+      {goalOpen && <GoalModal cat={cat} onClose={() => setGoalOpen(false)} />}
+    </>
+  );
+}
+
 // ─── BudgetPage ───────────────────────────────────────────────────────────────
 
 export function BudgetPage() {
@@ -626,35 +889,14 @@ export function BudgetPage() {
               <div style={{ border: '1px solid #E7DFD0', borderTop: 'none', minWidth: '100%', width: '100%' }}>
                 {/* Category rows */}
                 {group.categories.map((cat) => (
-                  <div
+                  <CategoryRow
                     key={cat.id}
-                    style={{ ...budgetGridStyle(gridCols), borderBottom: '1px solid #F0EADD', background: '#FBF8F1', alignItems: 'center', minHeight: 42 }}
-                    data-budget-grid-row
-                  >
-                    <EditableCategoryName cat={cat} />
-                    {months.map((m, mi) => {
-                      const d = getCatMonth(cat.id, mi);
-                      const avail = d?.availableCents ?? 0;
-                      return (
-                        <Fragment key={m}>
-                          {/* wrapper div carries the month separator border */}
-                          <div style={mi > 0 ? MONTH_SEP : undefined}>
-                            <AssignedCell
-                              month={m} categoryId={cat.id}
-                              assignedCents={d?.assignedCents ?? 0}
-                              isIncome={group.isIncome}
-                            />
-                          </div>
-                          <div style={{ ...S.cellMono, ...S.activityCell }}>
-                            {(d?.activityCents ?? 0) === 0 ? '—' : fmt$(d!.activityCents)}
-                          </div>
-                          <div style={{ ...S.cellMono, ...availStyle(avail) }}>
-                            {fmt$(avail)}
-                          </div>
-                        </Fragment>
-                      );
-                    })}
-                  </div>
+                    cat={cat}
+                    group={group}
+                    months={months}
+                    getCatMonth={getCatMonth}
+                    gridCols={gridCols}
+                  />
                 ))}
 
                 {/* Add category */}
