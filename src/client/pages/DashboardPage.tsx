@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 type FreeCashResponse = {
@@ -144,6 +144,38 @@ const S = {
   },
 };
 
+function Tooltip({ content, children }: { content: React.ReactNode; children: React.ReactNode }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <span
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={() => setVisible(true)}
+      onMouseLeave={() => setVisible(false)}
+    >
+      {children}
+      {visible && (
+        <div style={{
+          position: 'absolute',
+          bottom: 'calc(100% + 7px)',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#1C1917',
+          color: '#FBF8F1',
+          padding: '8px 11px',
+          fontSize: 11.5,
+          lineHeight: 1.55,
+          width: 'max-content',
+          maxWidth: 260,
+          zIndex: 200,
+          pointerEvents: 'none',
+        }}>
+          {content}
+        </div>
+      )}
+    </span>
+  );
+}
+
 export function DashboardPage() {
   const [activeView, setActiveView] = useState<ActiveView>('now');
 
@@ -173,35 +205,61 @@ export function DashboardPage() {
     'per-account': 'Proportional share of total free cash per account',
   };
 
+  const viewTooltips: Record<ActiveView, string> = {
+    now: 'Rolling 30-day window from today. Deducts scheduled transactions due within the next 30 days.',
+    eom: `Calendar month view. Deducts only scheduled transactions due by the end of ${monthLabel(data.month)}.`,
+    'per-account': 'Shows your total unassigned cash allocated proportionally across each cash account by balance.',
+  };
+
+  const monoStyle = { fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: 'tabular-nums' as const };
+  const heroTooltip = (
+    <div style={{ ...monoStyle, fontSize: 11 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20 }}>
+        <span>Cash Accounts</span><span>{fmt$(data.cashBalanceCents)}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginTop: 3 }}>
+        <span>Reserved for Budget</span><span>−{fmt$(data.reservedEnvelopeCents)}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginTop: 3 }}>
+        <span>{activeView === 'eom' ? 'Scheduled (month-end)' : 'Scheduled Transactions'}</span>
+        <span>−{fmt$(displayUncoveredScheduled)}</span>
+      </div>
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.2)', marginTop: 6, paddingTop: 6, display: 'flex', justifyContent: 'space-between', gap: 20 }}>
+        <span>Unassigned Cash</span><span>{fmt$(displayFreeCash)}</span>
+      </div>
+    </div>
+  );
+
   return (
     <div>
       <section style={S.hero}>
         <div>
-          <div style={S.eyebrow}>Vol. 1 · Free Cash</div>
+          <div style={S.eyebrow}>Vol. 1 · Unassigned Cash</div>
           <hr style={S.rule} />
           <div style={{ color: '#78716C', fontSize: 12.5 }}>{monthLabel(data.month)}</div>
 
           {/* View toggle */}
           <div style={{ display: 'flex', marginTop: 16, marginBottom: 4 }}>
             {(['now', 'eom', 'per-account'] as const).map((view, i, arr) => (
-              <button
-                key={view}
-                onClick={() => setActiveView(view)}
-                style={{
-                  background: activeView === view ? '#1C1917' : 'none',
-                  color: activeView === view ? '#FBF8F1' : '#78716C',
-                  border: '1px solid #E7DFD0',
-                  borderRight: i < arr.length - 1 ? 'none' : '1px solid #E7DFD0',
-                  padding: '5px 14px',
-                  fontSize: 11,
-                  fontFamily: 'inherit',
-                  cursor: 'pointer',
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                {VIEW_LABELS[view]}
-              </button>
+              <Tooltip key={view} content={viewTooltips[view]}>
+                <button
+                  onClick={() => setActiveView(view)}
+                  style={{
+                    background: activeView === view ? '#1C1917' : 'none',
+                    color: activeView === view ? '#FBF8F1' : '#78716C',
+                    border: '1px solid #E7DFD0',
+                    borderRight: i < arr.length - 1 ? 'none' : '1px solid #E7DFD0',
+                    padding: '5px 14px',
+                    fontSize: 11,
+                    fontFamily: 'inherit',
+                    cursor: 'pointer',
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  {VIEW_LABELS[view]}
+                </button>
+              </Tooltip>
             ))}
           </div>
 
@@ -244,9 +302,11 @@ export function DashboardPage() {
               )}
             </div>
           ) : (
-            <div style={{ ...S.heroNumber, color: displayColor }}>
-              {fmt$(displayFreeCash)}
-            </div>
+            <Tooltip content={heroTooltip}>
+              <div style={{ ...S.heroNumber, color: displayColor }}>
+                {fmt$(displayFreeCash)}
+              </div>
+            </Tooltip>
           )}
 
           <p style={S.subtitle}>{subtitleText[activeView]}</p>
@@ -255,16 +315,16 @@ export function DashboardPage() {
         {activeView !== 'per-account' && (
           <div style={S.stats}>
             <div style={S.statRow}>
-              <span style={S.statLabel}>Cash accounts</span>
+              <span style={S.statLabel}>Cash Accounts</span>
               <span style={S.mono}>{fmt$(data.cashBalanceCents)}</span>
             </div>
             <div style={S.statRow}>
-              <span style={S.statLabel}>Reserves</span>
+              <span style={S.statLabel}>Reserved for Budget</span>
               <span style={S.mono}>{fmtSubtract$(data.reservedEnvelopeCents)}</span>
             </div>
             <div style={{ ...S.statRow, borderBottom: 'none' }}>
               <span style={S.statLabel}>
-                {activeView === 'eom' ? 'Scheduled (month-end)' : 'Scheduled outflows'}
+                {activeView === 'eom' ? 'Scheduled (month-end)' : 'Scheduled Transactions'}
               </span>
               <span style={S.mono}>{fmtSubtract$(displayUncoveredScheduled)}</span>
             </div>
@@ -311,7 +371,7 @@ export function DashboardPage() {
         <div style={S.sectionHeader}>
           <div>
             <div style={S.eyebrow}>Reserved</div>
-            <h2 style={S.h2}>Category Balances</h2>
+            <h2 style={S.h2}>Budget Balances</h2>
           </div>
         </div>
 
@@ -320,7 +380,7 @@ export function DashboardPage() {
         ) : (
           <div style={S.table}>
             <div style={S.summaryRow}>
-              <div style={S.name}>Total reserves</div>
+              <div style={S.name}>Total Reserved</div>
               <div style={{ ...S.mono, textAlign: 'right' }}>{fmt$(data.reservedEnvelopeCents)}</div>
             </div>
             {data.reservedCategories.map((cat, idx) => (
