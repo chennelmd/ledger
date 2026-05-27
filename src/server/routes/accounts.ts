@@ -79,24 +79,68 @@ accountsRouter.post('/', async (c) => {
 
   const {
     linkedDebtCategoryId,
-    startingBalanceCategoryId = linkedDebtCategoryId,
+    startingBalanceCategoryId,
     ...accountData
   } = parsed.data;
   const id = nanoid();
-
-  // For on-budget liability accounts with pre-existing debt, a selected category lets the
-  // starting balance become budget activity for the linked debt envelope.
-  // Without this, assignments to the envelope grow its available balance forever while the
-  // account balance never changes (payments are transfers), making RTA go deeply negative.
-  // If no category is selected, keep the starting balance on the account instead of creating
-  // an uncategorized ledger row.
-  const needsStartingBalanceTx =
-    accountData.isOnBudget &&
-    accountData.type === 'liability' &&
-    accountData.startingBalanceCents !== 0 &&
-    !!startingBalanceCategoryId;
+  const now = new Date().toISOString();
 
   const inserted = db.transaction((tx) => {
+    // Resolve the debt category for this account. Priority: explicit startingBalanceCategoryId,
+    // then linkedDebtCategoryId, then auto-create. Auto-creation fires for every on-budget
+    // liability that arrives without a category — zero-balance new cards included — so the
+    // Carrying Debt envelope always exists from day one.
+    let resolvedDebtCategoryId = startingBalanceCategoryId ?? linkedDebtCategoryId ?? null;
+
+    const isOnBudgetLiability = accountData.isOnBudget && accountData.type === 'liability';
+
+    if (!resolvedDebtCategoryId && isOnBudgetLiability) {
+      // Find or create the "Debt Payments" category group.
+      let debtGroup = tx
+        .select()
+        .from(schema.categoryGroups)
+        .where(and(eq(schema.categoryGroups.name, 'Debt Payments'), isNull(schema.categoryGroups.deletedAt)))
+        .get();
+
+      if (!debtGroup) {
+        const maxSort = tx
+          .select({ v: sql<number>`coalesce(max(${schema.categoryGroups.sortOrder}), 0)` })
+          .from(schema.categoryGroups)
+          .get();
+        debtGroup = tx
+          .insert(schema.categoryGroups)
+          .values({ id: nanoid(), name: 'Debt Payments', sortOrder: (maxSort?.v ?? 0) + 1 })
+          .returning()
+          .get();
+      }
+
+      const maxCatSort = tx
+        .select({ v: sql<number>`coalesce(max(${schema.categories.sortOrder}), 0)` })
+        .from(schema.categories)
+        .where(and(eq(schema.categories.groupId, debtGroup.id), isNull(schema.categories.deletedAt)))
+        .get();
+
+      const cat = tx
+        .insert(schema.categories)
+        .values({
+          id: nanoid(),
+          groupId: debtGroup.id,
+          name: `Bank Card Debt – ${accountData.name}`,
+          rolloverOverspending: true,
+          linkedDebtAccountId: id,
+          sortOrder: (maxCatSort?.v ?? 0) + 1,
+        })
+        .returning()
+        .get();
+
+      resolvedDebtCategoryId = cat.id;
+    }
+
+    const needsStartingBalanceTx =
+      isOnBudgetLiability &&
+      accountData.startingBalanceCents !== 0 &&
+      !!resolvedDebtCategoryId;
+
     const account = tx
       .insert(schema.accounts)
       .values({
@@ -108,8 +152,7 @@ accountsRouter.post('/', async (c) => {
       .get();
 
     if (needsStartingBalanceTx) {
-      const date =
-        accountData.startingBalanceDate ?? new Date().toISOString().slice(0, 10);
+      const date = accountData.startingBalanceDate ?? new Date().toISOString().slice(0, 10);
       const txn = tx
         .insert(schema.transactions)
         .values({
@@ -126,18 +169,20 @@ accountsRouter.post('/', async (c) => {
         id: nanoid(),
         transactionId: txn.id,
         amountCents: accountData.startingBalanceCents,
-        categoryId: startingBalanceCategoryId ?? null,
+        categoryId: resolvedDebtCategoryId,
         sortOrder: 0,
       }).run();
     }
 
+    // For user-selected categories, update the linkage. Auto-created categories already
+    // have linkedDebtAccountId set at insert time and need no further update.
     if (linkedDebtCategoryId) {
       tx.update(schema.categories)
-        .set({ linkedDebtAccountId: null, updatedAt: new Date().toISOString() })
+        .set({ linkedDebtAccountId: null, updatedAt: now })
         .where(eq(schema.categories.linkedDebtAccountId, id))
         .run();
       tx.update(schema.categories)
-        .set({ linkedDebtAccountId: id, updatedAt: new Date().toISOString() })
+        .set({ linkedDebtAccountId: id, updatedAt: now })
         .where(eq(schema.categories.id, linkedDebtCategoryId))
         .run();
     }

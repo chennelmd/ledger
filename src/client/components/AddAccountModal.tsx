@@ -411,7 +411,9 @@ export function AddAccountModal({ onClose, account }: Props) {
                         value={debtCategoryId}
                         onChange={(e) => setDebtCategoryId(e.target.value)}
                       >
-                        <option value="">Keep as account balance</option>
+                        <option value="">
+                          {isEditing ? 'None' : `Auto-create: Bank Card Debt – ${name.trim() || 'Account Name'}`}
+                        </option>
                         {categoryGroups?.filter((g) => !g.isIncome).map((g) => (
                           <optgroup key={g.id} label={g.name}>
                             {g.categories.map((cat) => (

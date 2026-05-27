@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 type FreeCashResponse = {
@@ -7,18 +8,11 @@ type FreeCashResponse = {
   scheduledOutflowsCents: number;
   uncoveredScheduledOutflowsCents: number;
   freeCashCents: number;
-  cashAccounts: Array<{
-    id: string;
-    name: string;
-    subtype: string;
-    balanceCents: number;
-  }>;
-  reservedCategories: Array<{
-    id: string;
-    name: string;
-    groupName: string;
-    availableCents: number;
-  }>;
+  freeCashEOMCents: number;
+  uncoveredScheduledOutflowsEOMCents: number;
+  prevMonthNetCents: number;
+  cashAccounts: Array<{ id: string; name: string; subtype: string; balanceCents: number }>;
+  reservedCategories: Array<{ id: string; name: string; groupName: string; availableCents: number }>;
 };
 
 async function fetchFreeCash(): Promise<FreeCashResponse> {
@@ -34,10 +28,15 @@ const fmtSubtract$ = (cents: number) => cents === 0 ? fmt$(0) : `-${fmt$(cents)}
 
 const monthLabel = (month: string) => {
   const [year, monthIndex] = month.split('-').map(Number);
-  return new Date(year, monthIndex - 1, 1).toLocaleString('en-US', {
-    month: 'long',
-    year: 'numeric',
-  });
+  return new Date(year, monthIndex - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+};
+
+type ActiveView = 'now' | 'eom' | 'per-account';
+
+const VIEW_LABELS: Record<ActiveView, string> = {
+  now: 'Right now',
+  eom: 'End of month',
+  'per-account': 'Per account',
 };
 
 const S = {
@@ -146,6 +145,8 @@ const S = {
 };
 
 export function DashboardPage() {
+  const [activeView, setActiveView] = useState<ActiveView>('now');
+
   const { data, isLoading, error } = useQuery({
     queryKey: ['dashboard', 'free-cash'],
     queryFn: fetchFreeCash,
@@ -155,7 +156,22 @@ export function DashboardPage() {
   if (error) return <p style={{ color: '#7A1F2B' }}>Error: {(error as Error).message}</p>;
   if (!data) return null;
 
-  const freeCashColor = data.freeCashCents < 0 ? '#7A1F2B' : '#365142';
+  // Color: red if negative; amber if positive but cash-minus-reserved fell vs last month; green otherwise.
+  const thisMonthNet = data.cashBalanceCents - data.reservedEnvelopeCents;
+  const trendingDown = data.freeCashCents > 0 && thisMonthNet < data.prevMonthNetCents;
+  const freeCashColor = data.freeCashCents < 0 ? '#7A1F2B' : trendingDown ? '#B45309' : '#365142';
+
+  const displayFreeCash = activeView === 'eom' ? data.freeCashEOMCents : data.freeCashCents;
+  const displayUncoveredScheduled =
+    activeView === 'eom' ? data.uncoveredScheduledOutflowsEOMCents : data.uncoveredScheduledOutflowsCents;
+  const displayColor =
+    displayFreeCash < 0 ? '#7A1F2B' : trendingDown && activeView === 'now' ? '#B45309' : '#365142';
+
+  const subtitleText: Record<ActiveView, string> = {
+    now: 'Right now — next 30 days of scheduled bills deducted',
+    eom: `End of ${monthLabel(data.month)} — bills through month-end deducted`,
+    'per-account': 'Proportional share of total free cash per account',
+  };
 
   return (
     <div>
@@ -164,26 +180,96 @@ export function DashboardPage() {
           <div style={S.eyebrow}>Vol. 1 · Free Cash</div>
           <hr style={S.rule} />
           <div style={{ color: '#78716C', fontSize: 12.5 }}>{monthLabel(data.month)}</div>
-          <div style={{ ...S.heroNumber, color: freeCashColor }}>
-            {fmt$(data.freeCashCents)}
+
+          {/* View toggle */}
+          <div style={{ display: 'flex', marginTop: 16, marginBottom: 4 }}>
+            {(['now', 'eom', 'per-account'] as const).map((view, i, arr) => (
+              <button
+                key={view}
+                onClick={() => setActiveView(view)}
+                style={{
+                  background: activeView === view ? '#1C1917' : 'none',
+                  color: activeView === view ? '#FBF8F1' : '#78716C',
+                  border: '1px solid #E7DFD0',
+                  borderRight: i < arr.length - 1 ? 'none' : '1px solid #E7DFD0',
+                  padding: '5px 14px',
+                  fontSize: 11,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                {VIEW_LABELS[view]}
+              </button>
+            ))}
           </div>
-          <p style={S.subtitle}>Right now</p>
+
+          {/* Hero number or per-account table */}
+          {activeView === 'per-account' ? (
+            <div style={{ ...S.table, marginTop: 12 }}>
+              <div style={S.summaryRow}>
+                <div style={S.name}>Total free cash</div>
+                <div style={{ ...S.mono, textAlign: 'right', color: freeCashColor }}>
+                  {fmt$(data.freeCashCents)}
+                </div>
+              </div>
+              {data.cashAccounts.length === 0 ? (
+                <div style={{ padding: '13px 16px', color: '#78716C', fontSize: 13 }}>No cash accounts.</div>
+              ) : (
+                data.cashAccounts.map((account, idx) => {
+                  const proportion = data.cashBalanceCents !== 0
+                    ? account.balanceCents / data.cashBalanceCents
+                    : 0;
+                  const accountFreeCash = Math.round(proportion * data.freeCashCents);
+                  const accountColor = accountFreeCash < 0 ? '#7A1F2B' : '#1C1917';
+                  return (
+                    <div
+                      key={account.id}
+                      style={{
+                        ...S.row,
+                        borderBottom: idx === data.cashAccounts.length - 1 ? 'none' : S.row.borderBottom,
+                      }}
+                    >
+                      <div>
+                        <div style={S.name}>{account.name}</div>
+                        <div style={S.meta}>{account.subtype} · {fmt$(account.balanceCents)}</div>
+                      </div>
+                      <div style={{ ...S.mono, textAlign: 'right', color: accountColor }}>
+                        {fmt$(accountFreeCash)}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : (
+            <div style={{ ...S.heroNumber, color: displayColor }}>
+              {fmt$(displayFreeCash)}
+            </div>
+          )}
+
+          <p style={S.subtitle}>{subtitleText[activeView]}</p>
         </div>
 
-        <div style={S.stats}>
-          <div style={S.statRow}>
-            <span style={S.statLabel}>Cash accounts</span>
-            <span style={S.mono}>{fmt$(data.cashBalanceCents)}</span>
+        {activeView !== 'per-account' && (
+          <div style={S.stats}>
+            <div style={S.statRow}>
+              <span style={S.statLabel}>Cash accounts</span>
+              <span style={S.mono}>{fmt$(data.cashBalanceCents)}</span>
+            </div>
+            <div style={S.statRow}>
+              <span style={S.statLabel}>Reserves</span>
+              <span style={S.mono}>{fmtSubtract$(data.reservedEnvelopeCents)}</span>
+            </div>
+            <div style={{ ...S.statRow, borderBottom: 'none' }}>
+              <span style={S.statLabel}>
+                {activeView === 'eom' ? 'Scheduled (month-end)' : 'Scheduled outflows'}
+              </span>
+              <span style={S.mono}>{fmtSubtract$(displayUncoveredScheduled)}</span>
+            </div>
           </div>
-          <div style={S.statRow}>
-            <span style={S.statLabel}>Reserves</span>
-            <span style={S.mono}>{fmtSubtract$(data.reservedEnvelopeCents)}</span>
-          </div>
-          <div style={{ ...S.statRow, borderBottom: 'none' }}>
-            <span style={S.statLabel}>Scheduled outflows</span>
-            <span style={S.mono}>{fmtSubtract$(data.uncoveredScheduledOutflowsCents)}</span>
-          </div>
-        </div>
+        )}
       </section>
 
       <section>
