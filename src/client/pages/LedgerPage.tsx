@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, Pencil, Send, SkipForward, Trash2 } from 'lucide-react';
 import type { Account } from '../../db/schema.js';
 import { AddTransactionModal } from '../components/AddTransactionModal.js';
+import { ReconcileModal } from '../components/ReconcileModal.js';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -173,6 +174,16 @@ const S = {
     cursor: 'pointer',
     fontFamily: 'inherit',
   },
+  reconcileBtn: {
+    background: 'none',
+    border: '1px solid #E7DFD0',
+    color: '#78716C',
+    padding: '8px 16px',
+    fontSize: 12.5,
+    letterSpacing: '0.06em',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
   table: {
     width: '100%',
     borderCollapse: 'collapse' as const,
@@ -332,7 +343,8 @@ const S = {
 export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: string }) {
   const qc = useQueryClient();
   const [accountId, setAccountId] = useState(initialAccountId);
-  const [showAdd, setShowAdd]     = useState(false);
+  const [showAdd, setShowAdd]         = useState(false);
+  const [showReconcile, setShowReconcile] = useState(false);
   const [editingId, setEditingId]         = useState<string | null>(null);
   const [editForm, setEditForm]           = useState<EditForm | null>(null);
   const [expandedSplits, setExpandedSplits] = useState<Set<string>>(new Set());
@@ -483,6 +495,8 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
   );
   const hasLedgerRows = (txns?.length ?? 0) > 0 || visibleSchedules.length > 0;
 
+  const selectedAccount = accounts?.find(a => a.id === accountId);
+
   return (
     <>
       {showAdd && (
@@ -492,11 +506,18 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
         />
       )}
 
+      {showReconcile && selectedAccount && (
+        <ReconcileModal
+          account={selectedAccount}
+          onClose={() => setShowReconcile(false)}
+        />
+      )}
+
       <div style={S.toolbar}>
         <select
           style={S.select}
           value={accountId}
-          onChange={(e) => setAccountId(e.target.value)}
+          onChange={(e) => { setAccountId(e.target.value); setShowReconcile(false); }}
         >
           <option value="">All accounts</option>
           {accounts?.map((a) => (
@@ -504,9 +525,16 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
           ))}
         </select>
 
-        <button style={S.addBtn} onClick={() => setShowAdd(true)}>
-          + New Transaction
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {selectedAccount && (
+            <button style={S.reconcileBtn} onClick={() => setShowReconcile(true)}>
+              Reconcile
+            </button>
+          )}
+          <button style={S.addBtn} onClick={() => setShowAdd(true)}>
+            + New Transaction
+          </button>
+        </div>
       </div>
 
       {isLoading && <p style={{ color: '#78716C' }}>Loading…</p>}

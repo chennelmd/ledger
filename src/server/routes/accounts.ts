@@ -3,7 +3,7 @@ import { eq, isNull, and, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { db, schema } from '../../db/client.js';
-import { NewAccountSchema } from '../../shared/schemas.js';
+import { NewAccountSchema, ReconcileSchema } from '../../shared/schemas.js';
 
 export const accountsRouter = new Hono();
 
@@ -47,6 +47,107 @@ accountsRouter.get('/', async (c) => {
   }));
 
   return c.json(enriched);
+});
+
+// GET /api/accounts/:id/reconcile — cleared balance for reconciliation UI
+accountsRouter.get('/:id/reconcile', async (c) => {
+  const id = c.req.param('id');
+
+  const account = await db
+    .select()
+    .from(schema.accounts)
+    .where(and(eq(schema.accounts.id, id), isNull(schema.accounts.deletedAt)))
+    .get();
+  if (!account) return c.json({ error: 'not found' }, 404);
+
+  const [sumRow, countRow] = await Promise.all([
+    db.select({ net: sql<number>`coalesce(sum(${schema.transactions.amountCents}), 0)` })
+      .from(schema.transactions)
+      .where(and(
+        eq(schema.transactions.accountId, id),
+        isNull(schema.transactions.deletedAt),
+        eq(schema.transactions.cleared, true),
+      ))
+      .get(),
+
+    db.select({ count: sql<number>`count(*)` })
+      .from(schema.transactions)
+      .where(and(
+        eq(schema.transactions.accountId, id),
+        isNull(schema.transactions.deletedAt),
+        eq(schema.transactions.cleared, true),
+      ))
+      .get(),
+  ]);
+
+  return c.json({
+    clearedBalanceCents: account.startingBalanceCents + Number(sumRow?.net ?? 0),
+    clearedCount: Number(countRow?.count ?? 0),
+  });
+});
+
+// POST /api/accounts/:id/reconcile — apply statement balance; create adjustment if needed
+accountsRouter.post('/:id/reconcile', async (c) => {
+  const id = c.req.param('id');
+  const body = await c.req.json();
+  const parsed = ReconcileSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+
+  const { statementBalanceCents } = parsed.data;
+
+  const account = await db
+    .select()
+    .from(schema.accounts)
+    .where(and(eq(schema.accounts.id, id), isNull(schema.accounts.deletedAt)))
+    .get();
+  if (!account) return c.json({ error: 'not found' }, 404);
+
+  const sumRow = await db
+    .select({ net: sql<number>`coalesce(sum(${schema.transactions.amountCents}), 0)` })
+    .from(schema.transactions)
+    .where(and(
+      eq(schema.transactions.accountId, id),
+      isNull(schema.transactions.deletedAt),
+      eq(schema.transactions.cleared, true),
+    ))
+    .get();
+
+  const clearedBalanceCents = account.startingBalanceCents + Number(sumRow?.net ?? 0);
+  const adjustmentCents = statementBalanceCents - clearedBalanceCents;
+  const now = new Date().toISOString();
+
+  const result = db.transaction((tx) => {
+    let adjustmentId: string | null = null;
+
+    if (adjustmentCents !== 0) {
+      const adj = tx.insert(schema.transactions).values({
+        id: nanoid(),
+        accountId: id,
+        date: now.slice(0, 10),
+        amountCents: adjustmentCents,
+        notes: 'Reconciliation adjustment',
+        cleared: true,
+        createdAt: now,
+        updatedAt: now,
+      }).returning().get();
+      adjustmentId = adj.id;
+    }
+
+    // Lock all cleared-but-unreconciled transactions
+    tx.update(schema.transactions)
+      .set({ reconciled: true, updatedAt: now })
+      .where(and(
+        eq(schema.transactions.accountId, id),
+        isNull(schema.transactions.deletedAt),
+        eq(schema.transactions.cleared, true),
+        eq(schema.transactions.reconciled, false),
+      ))
+      .run();
+
+    return { ok: true, adjustmentCents, adjustmentId };
+  });
+
+  return c.json(result);
 });
 
 // GET /api/accounts/:id — single account

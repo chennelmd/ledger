@@ -159,4 +159,10 @@ export const BudgetAssignmentSchema = z.object({
   assignedCents: z.number().int().min(0),
 });
 
+// ─── Reconciliation ───────────────────────────────────────────────────────────
+
+export const ReconcileSchema = z.object({
+  statementBalanceCents: z.number().int(),
+});
+
 export type BudgetAssignmentInput = z.infer<typeof BudgetAssignmentSchema>;
