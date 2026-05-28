@@ -62,6 +62,17 @@ function ordinal(n: number) {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
+const SUBTYPE_PLURAL: Record<string, string> = {
+  credit_card: 'Credit Cards',
+  heloc: 'HELOCs',
+  mortgage: 'Mortgages',
+  student_loan: 'Student Loans',
+  tax_debt: 'Tax Debt',
+  auto_loan: 'Auto Loans',
+  personal_loan: 'Personal Loans',
+  retirement_loan: 'Retirement Loans',
+};
+
 function subtypeLabel(s: string) {
   return (
     ({
@@ -927,6 +938,60 @@ function SummaryBar({ data }: { data: DebtResponse }) {
   );
 }
 
+// ─── TypeBreakdown ────────────────────────────────────────────────────────────
+
+function TypeBreakdown({ data }: { data: DebtResponse }) {
+  // Group total owed by account subtype
+  const groups = new Map<string, number>();
+  for (const acct of data.accounts) {
+    if (acct.owedCents > 0) {
+      groups.set(acct.subtype, (groups.get(acct.subtype) ?? 0) + acct.owedCents);
+    }
+  }
+
+  const sorted = [...groups.entries()].sort(([, a], [, b]) => b - a);
+
+  // Only render when there are 2+ distinct types — with a single type the
+  // summary bar already shows the total, so the breakdown adds nothing.
+  if (sorted.length < 2) return null;
+
+  return (
+    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}>
+      {sorted.map(([subtype, cents]) => (
+        <div
+          key={subtype}
+          style={{
+            flex: '1 1 140px',
+            border: '1px solid #E7DFD0',
+            background: '#FBF8F1',
+            padding: '14px 18px',
+          }}
+        >
+          <div style={{
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: '#78716C',
+            marginBottom: 6,
+          }}>
+            {SUBTYPE_PLURAL[subtype] ?? subtypeLabel(subtype)}
+          </div>
+          <div style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontVariantNumeric: 'tabular-nums',
+            fontSize: 20,
+            fontWeight: 600,
+            color: '#7A1F2B',
+          }}>
+            {fmt$(cents)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── DebtPage ─────────────────────────────────────────────────────────────────
 
 export function DebtPage() {
@@ -992,6 +1057,9 @@ export function DebtPage() {
 
       {/* Summary bar */}
       {hasAccounts && <SummaryBar data={data} />}
+
+      {/* By-type breakdown — only shown when there are 2+ debt types */}
+      {hasAccounts && <TypeBreakdown data={data} />}
 
       {/* Account cards */}
       {hasAccounts ? (

@@ -231,17 +231,32 @@ dashboardRouter.get('/free-cash', async (c) => {
     }
   }
 
-  // Reserved = positive non-debt envelope balances (money that's spoken for).
+  // Split positive envelope balances into two buckets:
+  //   categoryBalances   — regular expense envelopes ("Reserved for Budget")
+  //   debtPaymentCents   — debt-payment envelopes (shown separately; excluded from budget page
+  //                        but still represents cash that is spoken for)
   const categoryBalances: CategoryBalance[] = [];
+  let debtPaymentCents = 0;
   for (const cat of cats) {
     const availableCents = balanceMap.get(cat.id) ?? 0;
-    if (availableCents <= 0 || cat.linkedDebtAccountId) continue;
-    categoryBalances.push({ id: cat.id, name: cat.name, groupName: cat.groupName, availableCents });
+    if (availableCents <= 0) continue;
+    if (cat.linkedDebtAccountId) {
+      debtPaymentCents += availableCents;
+    } else {
+      categoryBalances.push({ id: cat.id, name: cat.name, groupName: cat.groupName, availableCents });
+    }
   }
   categoryBalances.sort((a, b) => b.availableCents - a.availableCents);
 
   const reservedEnvelopeCents = categoryBalances.reduce((sum, c) => sum + c.availableCents, 0);
-  const reserveByCategoryId   = new Map(categoryBalances.map((c) => [c.id, c.availableCents]));
+  // Reserve map covers both regular and debt envelopes so scheduled outflows
+  // against debt categories are correctly marked as covered.
+  const reserveByCategoryId = new Map<string, number>([
+    ...categoryBalances.map((c): [string, number] => [c.id, c.availableCents]),
+    ...cats
+      .filter((cat) => cat.linkedDebtAccountId && (balanceMap.get(cat.id) ?? 0) > 0)
+      .map((cat): [string, number] => [cat.id, balanceMap.get(cat.id)!]),
+  ]);
 
   // ── Scheduled outflow projections ─────────────────────────────────────────
 
@@ -274,9 +289,10 @@ dashboardRouter.get('/free-cash', async (c) => {
     }
   }
 
+  // Include all positive envelopes (regular + debt) in the prev-month net for a consistent trend signal.
   const prevReservedCents = cats.reduce((sum, cat) => {
     const avail = prevBalanceMap.get(cat.id) ?? 0;
-    return avail > 0 && !cat.linkedDebtAccountId ? sum + avail : sum;
+    return avail > 0 ? sum + avail : sum;
   }, 0);
 
   // Excludes scheduled outflows — those change window-to-window and would make trend noisy.
@@ -286,13 +302,14 @@ dashboardRouter.get('/free-cash', async (c) => {
     month,
     cashBalanceCents,
     reservedEnvelopeCents,
+    debtPaymentCents,
     // 30-day window
     scheduledOutflowsCents:          now30.totalCents,
     uncoveredScheduledOutflowsCents: now30.uncoveredCents,
-    freeCashCents:                   cashBalanceCents - reservedEnvelopeCents - now30.uncoveredCents,
+    freeCashCents:                   cashBalanceCents - reservedEnvelopeCents - debtPaymentCents - now30.uncoveredCents,
     // End-of-month window
     uncoveredScheduledOutflowsEOMCents: nowEOM.uncoveredCents,
-    freeCashEOMCents:                   cashBalanceCents - reservedEnvelopeCents - nowEOM.uncoveredCents,
+    freeCashEOMCents:                   cashBalanceCents - reservedEnvelopeCents - debtPaymentCents - nowEOM.uncoveredCents,
     // Trend signal: (cash − reserved) at end of previous month, no scheduled component
     prevMonthNetCents,
     cashAccounts,

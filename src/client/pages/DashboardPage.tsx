@@ -5,6 +5,7 @@ type FreeCashResponse = {
   month: string;
   cashBalanceCents: number;
   reservedEnvelopeCents: number;
+  debtPaymentCents: number;
   scheduledOutflowsCents: number;
   uncoveredScheduledOutflowsCents: number;
   freeCashCents: number;
@@ -189,7 +190,7 @@ export function DashboardPage() {
   if (!data) return null;
 
   // Color: red if negative; amber if positive but cash-minus-reserved fell vs last month; green otherwise.
-  const thisMonthNet = data.cashBalanceCents - data.reservedEnvelopeCents;
+  const thisMonthNet = data.cashBalanceCents - data.reservedEnvelopeCents - data.debtPaymentCents;
   const trendingDown = data.freeCashCents > 0 && thisMonthNet < data.prevMonthNetCents;
   const freeCashColor = data.freeCashCents < 0 ? '#7A1F2B' : trendingDown ? '#B45309' : '#365142';
 
@@ -220,6 +221,11 @@ export function DashboardPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginTop: 3 }}>
         <span>Reserved for Budget</span><span>−{fmt$(data.reservedEnvelopeCents)}</span>
       </div>
+      {data.debtPaymentCents > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginTop: 3 }}>
+          <span>Debt Payments</span><span>−{fmt$(data.debtPaymentCents)}</span>
+        </div>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginTop: 3 }}>
         <span>{activeView === 'eom' ? 'Scheduled (month-end)' : 'Scheduled Transactions'}</span>
         <span>−{fmt$(displayUncoveredScheduled)}</span>
@@ -328,6 +334,12 @@ export function DashboardPage() {
               <span style={S.statLabel}>Reserved for Budget</span>
               <span style={S.mono}>{fmtSubtract$(data.reservedEnvelopeCents)}</span>
             </div>
+            {data.debtPaymentCents > 0 && (
+              <div style={S.statRow}>
+                <span style={S.statLabel}>Debt Payments</span>
+                <span style={S.mono}>{fmtSubtract$(data.debtPaymentCents)}</span>
+              </div>
+            )}
             <div style={{ ...S.statRow, borderBottom: 'none' }}>
               <span style={S.statLabel}>
                 {activeView === 'eom' ? 'Scheduled (month-end)' : 'Scheduled Transactions'}
