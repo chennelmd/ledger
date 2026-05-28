@@ -211,10 +211,12 @@ dashboardRouter.get('/free-cash', async (c) => {
     activityByMonth.get(row.month)!.set(row.categoryId, Number(row.activity));
   }
 
+  // Clamp to <= month so future-dated transactions don't bleed into the current
+  // month's envelope balance walk. The prev-month walk re-filters this list itself.
   const allMonths = [...new Set([
     ...assignedRows.map((r) => r.month),
     ...activityRows.map((r) => r.month),
-  ])].sort();
+  ])].sort().filter((m) => m <= month);
 
   // Walk all months up to and including current month, accumulating balances.
   const balanceMap = new Map<string, number>();

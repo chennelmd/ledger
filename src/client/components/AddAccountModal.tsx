@@ -283,7 +283,14 @@ export function AddAccountModal({ onClose, account }: Props) {
       subtype,
       isOnBudget,
       startingBalanceCents,
-      linkedDebtCategoryId: type === 'liability' && isOnBudget ? debtCategoryId || null : null,
+      // When editing, only send null (clear intent) if the user explicitly removed a
+      // previously-linked category. Sending null unconditionally wipes the link even
+      // when the user didn't touch the Debt Category field.
+      linkedDebtCategoryId: isEditing
+        ? (type === 'liability' && isOnBudget
+            ? (debtCategoryId || (account?.debtCategoryId ? null : undefined))
+            : undefined)
+        : (type === 'liability' && isOnBudget ? debtCategoryId || null : null),
     };
 
     if (type === 'liability') {

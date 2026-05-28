@@ -282,7 +282,7 @@ transactionsRouter.patch('/:id', async (c) => {
   const parsed = NewTransactionSchema.partial().safeParse(body);
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
 
-  const { payeeName, categoryId, splits, ...txnFields } = parsed.data;
+  const { payeeName, categoryId, splits, tags: _tags, ...txnFields } = parsed.data;
   const now = new Date().toISOString();
 
   const result = db.transaction((tx) => {
@@ -381,15 +381,13 @@ transactionsRouter.patch('/:id', async (c) => {
           isNull(schema.transactionSplits.transferAccountId),
         )).run();
 
-      if (categoryId) {
-        tx.insert(schema.transactionSplits).values({
-          id: nanoid(),
-          transactionId: id,
-          amountCents: txnFields.amountCents ?? updated.amountCents,
-          categoryId,
-          sortOrder: 0,
-        }).run();
-      }
+      tx.insert(schema.transactionSplits).values({
+        id: nanoid(),
+        transactionId: id,
+        amountCents: txnFields.amountCents ?? updated.amountCents,
+        categoryId: categoryId ?? null,
+        sortOrder: 0,
+      }).run();
     } else if (existingSingleSplitId) {
       tx.update(schema.transactionSplits)
         .set({ amountCents: updated.amountCents })
