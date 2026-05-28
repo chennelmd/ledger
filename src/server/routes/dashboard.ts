@@ -231,31 +231,40 @@ dashboardRouter.get('/free-cash', async (c) => {
     }
   }
 
-  // Split positive envelope balances into two buckets:
-  //   categoryBalances   — regular expense envelopes ("Reserved for Budget")
-  //   debtPaymentCents   — debt-payment envelopes (shown separately; excluded from budget page
-  //                        but still represents cash that is spoken for)
+  // Split envelope balances into two buckets:
+  //   categoryBalances — regular expense envelopes ("Reserved for Budget")
+  //   debtPaymentCents — money assigned to debt-payment envelopes this month
+  //
+  // Important: debt categories carry a large NEGATIVE cumulative balance from
+  // the starting-balance transaction (e.g. Chase debt cat has −$1,600 sitting
+  // in its balanceMap). Using the cumulative balanceMap for debt would always
+  // produce zero or negative. Instead we use the CURRENT MONTH'S ASSIGNMENT —
+  // that is exactly "how much did I set aside for debt payments this month."
   const categoryBalances: CategoryBalance[] = [];
   let debtPaymentCents = 0;
   for (const cat of cats) {
-    const availableCents = balanceMap.get(cat.id) ?? 0;
-    if (availableCents <= 0) continue;
     if (cat.linkedDebtAccountId) {
-      debtPaymentCents += availableCents;
+      const thisMonthAssigned = assignedByMonth.get(month)?.get(cat.id) ?? 0;
+      if (thisMonthAssigned > 0) debtPaymentCents += thisMonthAssigned;
     } else {
-      categoryBalances.push({ id: cat.id, name: cat.name, groupName: cat.groupName, availableCents });
+      const availableCents = balanceMap.get(cat.id) ?? 0;
+      if (availableCents > 0) {
+        categoryBalances.push({ id: cat.id, name: cat.name, groupName: cat.groupName, availableCents });
+      }
     }
   }
   categoryBalances.sort((a, b) => b.availableCents - a.availableCents);
 
   const reservedEnvelopeCents = categoryBalances.reduce((sum, c) => sum + c.availableCents, 0);
-  // Reserve map covers both regular and debt envelopes so scheduled outflows
-  // against debt categories are correctly marked as covered.
+  // Reserve map: regular envelopes use their cumulative available balance;
+  // debt envelopes use the current-month assignment so scheduled debt outflows
+  // show as covered when money is budgeted.
   const reserveByCategoryId = new Map<string, number>([
     ...categoryBalances.map((c): [string, number] => [c.id, c.availableCents]),
     ...cats
-      .filter((cat) => cat.linkedDebtAccountId && (balanceMap.get(cat.id) ?? 0) > 0)
-      .map((cat): [string, number] => [cat.id, balanceMap.get(cat.id)!]),
+      .filter((cat) => cat.linkedDebtAccountId)
+      .map((cat): [string, number] => [cat.id, assignedByMonth.get(month)?.get(cat.id) ?? 0])
+      .filter(([, v]) => v > 0),
   ]);
 
   // ── Scheduled outflow projections ─────────────────────────────────────────
