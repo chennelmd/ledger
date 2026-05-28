@@ -349,6 +349,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
   const [editingId, setEditingId]         = useState<string | null>(null);
   const [editForm, setEditForm]           = useState<EditForm | null>(null);
   const [expandedSplits, setExpandedSplits] = useState<Set<string>>(new Set());
+  const [mutErr, setMutErr] = useState<string | null>(null);
 
   function toggleSplit(id: string) {
     setExpandedSplits(prev => {
@@ -370,6 +371,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
     mutationFn: ({ id, cleared }: { id: string; cleared: boolean }) =>
       patchTransaction(id, { cleared }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['transactions'] }),
+    onError: (e) => setMutErr((e as Error).message),
   });
 
   const editMutation = useMutation({
@@ -381,6 +383,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       setEditingId(null);
       setEditForm(null);
     },
+    onError: (e) => setMutErr((e as Error).message),
   });
 
   const deleteMutation = useMutation({
@@ -389,6 +392,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       qc.invalidateQueries({ queryKey: ['transactions'] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
     },
+    onError: (e) => setMutErr((e as Error).message),
   });
 
   const postScheduleMutation = useMutation({
@@ -400,6 +404,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       qc.invalidateQueries({ queryKey: ['budget'] });
     },
+    onError: (e) => setMutErr((e as Error).message),
   });
 
   const skipScheduleMutation = useMutation({
@@ -408,6 +413,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       qc.invalidateQueries({ queryKey: ['schedules'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
+    onError: (e) => setMutErr((e as Error).message),
   });
 
   // Escape cancels the active edit
@@ -540,6 +546,12 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
 
       {isLoading && <p style={{ color: '#78716C' }}>Loading…</p>}
       {error && <p style={{ color: '#7A1F2B' }}>Error: {(error as Error).message}</p>}
+      {mutErr && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#FEF2F2', border: '1px solid #FECACA', padding: '8px 14px', marginBottom: 12, fontSize: 13, color: '#7A1F2B' }}>
+          <span>{mutErr}</span>
+          <button onClick={() => setMutErr(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#7A1F2B', fontSize: 16, lineHeight: 1, padding: '0 4px' }}>×</button>
+        </div>
+      )}
 
       {txns && !hasLedgerRows && (
         <div style={S.empty}>No transactions yet.</div>

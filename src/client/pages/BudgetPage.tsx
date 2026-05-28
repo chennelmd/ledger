@@ -305,14 +305,16 @@ function AssignedCell({ month, categoryId, assignedCents, isIncome }: {
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  if (isIncome) {
-    return <div style={{ ...S.cellMono, color: '#C5BDB5', paddingTop: 10, paddingBottom: 10 }}>—</div>;
-  }
-
+  // Must be declared before any conditional return — React hooks must always
+  // be called in the same order regardless of props.
   const mutation = useMutation({
     mutationFn: (cents: number) => putAssignment(month, categoryId, cents),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['budget', month] }),
   });
+
+  if (isIncome) {
+    return <div style={{ ...S.cellMono, color: '#C5BDB5', paddingTop: 10, paddingBottom: 10 }}>—</div>;
+  }
 
   function startEdit() {
     setDraft(assignedCents === 0 ? '' : (assignedCents / 100).toFixed(2));
