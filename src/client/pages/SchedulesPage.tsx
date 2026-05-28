@@ -1076,7 +1076,7 @@ export function SchedulesPage() {
               );
             }
 
-            const isOverdue = schedule.nextOccurrence < '2026-05-28';
+            const isOverdue = schedule.nextOccurrence < today();
             return (
               <div
                 key={schedule.id}
