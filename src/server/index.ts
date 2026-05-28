@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
+import { basicAuth } from 'hono/basic-auth';
 import { logger } from 'hono/logger';
 import { cors } from 'hono/cors';
 import { accountsRouter } from './routes/accounts.js';
@@ -18,6 +19,18 @@ const isProd = process.env.NODE_ENV === 'production';
 const app = new Hono();
 
 app.use('*', logger());
+
+// Basic Auth — required in production. Set AUTH_USERNAME and AUTH_PASSWORD
+// as environment variables. The app refuses to start in production without them.
+if (isProd) {
+  const username = process.env.AUTH_USERNAME;
+  const password = process.env.AUTH_PASSWORD;
+  if (!username || !password) {
+    console.error('ERROR: AUTH_USERNAME and AUTH_PASSWORD must be set in production.');
+    process.exit(1);
+  }
+  app.use('/*', basicAuth({ username, password }));
+}
 
 // CORS is only needed in dev — in production the server hosts both the client
 // and API from the same origin, so there are no cross-origin requests.

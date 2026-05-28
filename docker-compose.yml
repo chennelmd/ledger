@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ledger-data:/data
+    environment:
+      - NODE_ENV=production
+      - DB_PATH=/data/app.db
+      - PORT=3000
+      - AUTH_USERNAME=${AUTH_USERNAME}
+      - AUTH_PASSWORD=${AUTH_PASSWORD}
+
+volumes:
+  ledger-data:
