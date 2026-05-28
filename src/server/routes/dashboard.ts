@@ -182,6 +182,33 @@ dashboardRouter.get('/free-cash', async (c) => {
       )),
   ]);
 
+  // ── Payments already received by debt accounts this month ─────────────────
+  // Used to avoid double-counting: if you've assigned $950 for Chase AND already
+  // transferred $950 to Chase this month, the deduction from free cash should be
+  // $0 (the cash is already gone; no additional reservation needed).
+  const debtAccountIds = cats
+    .filter((c) => c.linkedDebtAccountId)
+    .map((c) => c.linkedDebtAccountId!);
+
+  const debtPaymentsThisMonth = debtAccountIds.length > 0
+    ? await db
+        .select({
+          accountId: schema.transactions.accountId,
+          paid: sql<number>`coalesce(sum(${schema.transactions.amountCents}), 0)`,
+        })
+        .from(schema.transactions)
+        .where(and(
+          isNull(schema.transactions.deletedAt),
+          inArray(schema.transactions.accountId, debtAccountIds),
+          sql`${schema.transactions.amountCents} > 0`,          // positive = payment received
+          sql`${schema.transactions.transferId} IS NOT NULL`,   // only transfer transactions
+          sql`strftime('%Y-%m', ${schema.transactions.date}) = ${month}`,
+        ))
+        .groupBy(schema.transactions.accountId)
+    : [];
+
+  const debtPaidMap = new Map(debtPaymentsThisMonth.map((r) => [r.accountId, Number(r.paid)]));
+
   // ── Current cash balances ─────────────────────────────────────────────────
 
   const accountTxnMap = new Map(accountTxnSums.map((r) => [r.accountId, Number(r.net)]));
@@ -244,8 +271,14 @@ dashboardRouter.get('/free-cash', async (c) => {
   let debtPaymentCents = 0;
   for (const cat of cats) {
     if (cat.linkedDebtAccountId) {
-      const thisMonthAssigned = assignedByMonth.get(month)?.get(cat.id) ?? 0;
-      if (thisMonthAssigned > 0) debtPaymentCents += thisMonthAssigned;
+      // Only deduct the UNFUNDED portion of the debt budget:
+      //   assigned this month − payments already transferred to the debt account this month
+      // This prevents double-counting: once the payment posts, the cash balance drops
+      // by the same amount, so we should stop reserving it here too.
+      const assigned = assignedByMonth.get(month)?.get(cat.id) ?? 0;
+      const paid     = debtPaidMap.get(cat.linkedDebtAccountId) ?? 0;
+      const unfunded = Math.max(0, assigned - paid);
+      debtPaymentCents += unfunded;
     } else {
       const availableCents = balanceMap.get(cat.id) ?? 0;
       if (availableCents > 0) {
@@ -257,13 +290,17 @@ dashboardRouter.get('/free-cash', async (c) => {
 
   const reservedEnvelopeCents = categoryBalances.reduce((sum, c) => sum + c.availableCents, 0);
   // Reserve map: regular envelopes use their cumulative available balance;
-  // debt envelopes use the current-month assignment so scheduled debt outflows
-  // show as covered when money is budgeted.
+  // debt envelopes use the unfunded portion so scheduled outflows show as covered
+  // only to the extent the budget hasn't already been paid out.
   const reserveByCategoryId = new Map<string, number>([
     ...categoryBalances.map((c): [string, number] => [c.id, c.availableCents]),
     ...cats
       .filter((cat) => cat.linkedDebtAccountId)
-      .map((cat): [string, number] => [cat.id, assignedByMonth.get(month)?.get(cat.id) ?? 0])
+      .map((cat): [string, number] => {
+        const assigned = assignedByMonth.get(month)?.get(cat.id) ?? 0;
+        const paid     = debtPaidMap.get(cat.linkedDebtAccountId!) ?? 0;
+        return [cat.id, Math.max(0, assigned - paid)];
+      })
       .filter(([, v]) => v > 0),
   ]);
 
