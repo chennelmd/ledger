@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import rrulePkg from 'rrule';
 import { db, schema } from '../../db/client.js';
@@ -299,4 +299,98 @@ dashboardRouter.get('/free-cash', async (c) => {
     reservedCategories:     categoryBalances,
     upcomingScheduledOutflows: now30.outflows,
   });
+});
+
+// GET /api/dashboard/debt?month=YYYY-MM
+dashboardRouter.get('/debt', async (c) => {
+  const month = c.req.query('month') ?? currentMonth();
+  if (!isMonth(month)) return c.json({ error: 'month must be YYYY-MM' }, 400);
+
+  // 1. On-budget liability accounts
+  const debtAccounts = await db
+    .select()
+    .from(schema.accounts)
+    .where(and(
+      isNull(schema.accounts.deletedAt),
+      eq(schema.accounts.isOnBudget, true),
+      eq(schema.accounts.type, 'liability'),
+    ));
+
+  if (debtAccounts.length === 0) {
+    return c.json({ month, accounts: [], totalDebtCents: 0, totalMonthlyPaymentCents: 0 });
+  }
+
+  const accountIds = debtAccounts.map((a) => a.id);
+
+  // 2. All-time transaction sums for each liability account (current balance)
+  const txnSums = await db
+    .select({
+      accountId: schema.transactions.accountId,
+      net: sql<number>`coalesce(sum(${schema.transactions.amountCents}), 0)`,
+    })
+    .from(schema.transactions)
+    .where(and(
+      isNull(schema.transactions.deletedAt),
+      inArray(schema.transactions.accountId, accountIds),
+    ))
+    .groupBy(schema.transactions.accountId);
+
+  const txnSumMap = new Map(txnSums.map((r) => [r.accountId, Number(r.net)]));
+
+  // 3. Debt categories linked to these accounts
+  const debtCategories = await db
+    .select({
+      id: schema.categories.id,
+      name: schema.categories.name,
+      linkedDebtAccountId: schema.categories.linkedDebtAccountId,
+    })
+    .from(schema.categories)
+    .where(and(
+      isNull(schema.categories.deletedAt),
+      inArray(schema.categories.linkedDebtAccountId, accountIds),
+    ));
+
+  const debtCatByAccountId = new Map(debtCategories.map((c) => [c.linkedDebtAccountId!, c]));
+
+  // 4. This month's budget assignment for each debt category
+  const catIds = debtCategories.map((c) => c.id);
+  const assignments = catIds.length > 0
+    ? await db
+        .select({ categoryId: schema.budgets.categoryId, assignedCents: schema.budgets.assignedCents })
+        .from(schema.budgets)
+        .where(and(eq(schema.budgets.month, month), inArray(schema.budgets.categoryId, catIds)))
+    : [];
+
+  const assignmentMap = new Map(assignments.map((r) => [r.categoryId, r.assignedCents]));
+
+  // 5. Assemble per-account response
+  const accounts = debtAccounts.map((account) => {
+    const balanceCents = account.startingBalanceCents + (txnSumMap.get(account.id) ?? 0);
+    const owedCents = Math.abs(balanceCents);
+    const debtCat = debtCatByAccountId.get(account.id) ?? null;
+    const monthlyPaymentCents = debtCat ? (assignmentMap.get(debtCat.id) ?? 0) : 0;
+
+    return {
+      id: account.id,
+      name: account.name,
+      subtype: account.subtype,
+      isRevolving: account.isRevolving,
+      owedCents,
+      creditLimitCents: account.creditLimitCents,
+      apr: account.apr,
+      standardApr: account.standardApr,
+      promoEndDate: account.promoEndDate,
+      minPaymentCents: account.minPaymentCents,
+      statementDay: account.statementDay,
+      dueDay: account.dueDay,
+      debtCategoryId: debtCat?.id ?? null,
+      debtCategoryName: debtCat?.name ?? null,
+      monthlyPaymentCents,
+    };
+  });
+
+  const totalDebtCents = accounts.reduce((s, a) => s + a.owedCents, 0);
+  const totalMonthlyPaymentCents = accounts.reduce((s, a) => s + a.monthlyPaymentCents, 0);
+
+  return c.json({ month, accounts, totalDebtCents, totalMonthlyPaymentCents });
 });

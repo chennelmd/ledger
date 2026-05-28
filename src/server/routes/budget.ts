@@ -166,11 +166,13 @@ budgetRouter.get('/:month', async (c) => {
         } else {
           // Expense rows: carryover from prior months + this month's assigned + activity
           availableCents = (carryoverMap.get(cat.id) ?? 0) + assignedCents + activityCents;
-          totalExpenseAvailableCents += availableCents;
+          // Debt categories are tracked on the Debt dashboard; exclude from RTA
+          if (!cat.linkedDebtAccountId) totalExpenseAvailableCents += availableCents;
         }
 
         return { ...cat, assignedCents, activityCents, availableCents };
-      });
+      })
+      .filter((cat) => !cat.linkedDebtAccountId);
 
     return { ...g, categories: groupCats };
   });
@@ -180,7 +182,7 @@ budgetRouter.get('/:month', async (c) => {
   // raises envelope totals by the same amount, keeping RTA stable.
   const readyToAssignCents = onBudgetBalance - totalExpenseAvailableCents;
 
-  return c.json({ month, readyToAssignCents, groups: enrichedGroups });
+  return c.json({ month, readyToAssignCents, groups: enrichedGroups.filter((g) => g.isIncome || g.categories.length > 0) });
 });
 
 // ─── PUT /:month/:categoryId ──────────────────────────────────────────────────

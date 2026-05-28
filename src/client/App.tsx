@@ -2,17 +2,19 @@ import { useState } from 'react';
 import { AccountsPage } from './pages/AccountsPage.js';
 import { BudgetPage } from './pages/BudgetPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
+import { DebtPage } from './pages/DebtPage.js';
 import { HelpPage } from './pages/HelpPage.js';
 import { LedgerPage } from './pages/LedgerPage.js';
 import { SchedulesPage } from './pages/SchedulesPage.js';
 
-type View = 'dashboard' | 'accounts' | 'budget' | 'ledger' | 'schedules' | 'help';
+type View = 'dashboard' | 'debt' | 'accounts' | 'budget' | 'ledger' | 'schedules' | 'help';
 
 const NAV: { id: View; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'accounts', label: 'Accounts' },
-  { id: 'budget',   label: 'Budget' },
-  { id: 'ledger',   label: 'Ledger' },
+  { id: 'debt',      label: 'Debt' },
+  { id: 'accounts',  label: 'Accounts' },
+  { id: 'budget',    label: 'Budget' },
+  { id: 'ledger',    label: 'Ledger' },
   { id: 'schedules', label: 'Schedules' },
 ];
 
@@ -108,6 +110,7 @@ export function App() {
       {/* Page content */}
       <main style={{ paddingTop: 32 }}>
         {view === 'dashboard' && <DashboardPage />}
+        {view === 'debt'      && <DebtPage />}
         {view === 'accounts' && <AccountsPage onNavigateToLedger={navigateToLedger} />}
         {view === 'budget'   && <BudgetPage />}
         {view === 'ledger'   && <LedgerPage initialAccountId={ledgerAccountId} />}
