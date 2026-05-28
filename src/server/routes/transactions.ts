@@ -239,6 +239,9 @@ transactionsRouter.patch('/transfer/:transferId', async (c) => {
       .all();
 
     if (legs.length === 0) return null;
+    if (legs.some((leg) => leg.reconciled)) {
+      return { error: 'reconciled transfers cannot be edited' };
+    }
 
     for (const leg of legs) {
       const setFields: Record<string, unknown> = { updatedAt: now };
@@ -268,6 +271,7 @@ transactionsRouter.patch('/transfer/:transferId', async (c) => {
   });
 
   if (!result) return c.json({ error: 'transfer not found' }, 404);
+  if (typeof result === 'object' && 'error' in result) return c.json({ error: result.error }, 400);
   return c.json({ ok: true });
 });
 
@@ -282,6 +286,19 @@ transactionsRouter.patch('/:id', async (c) => {
   const now = new Date().toISOString();
 
   const result = db.transaction((tx) => {
+    const existingTransaction = tx
+      .select({
+        id: schema.transactions.id,
+        reconciled: schema.transactions.reconciled,
+      })
+      .from(schema.transactions)
+      .where(and(eq(schema.transactions.id, id), isNull(schema.transactions.deletedAt)))
+      .get();
+    if (!existingTransaction) return null;
+    if (existingTransaction.reconciled) {
+      return { error: 'reconciled transactions cannot be edited' };
+    }
+
     const resizesExistingSingleSplit =
       txnFields.amountCents !== undefined && categoryId === undefined && !(splits && splits.length > 0);
     let existingSingleSplitId: string | undefined;
@@ -299,13 +316,6 @@ transactionsRouter.patch('/:id', async (c) => {
     if (resolvedPayeeId !== undefined) setFields.payeeId = resolvedPayeeId;
 
     if (resizesExistingSingleSplit) {
-      const existingTransaction = tx
-        .select({ id: schema.transactions.id })
-        .from(schema.transactions)
-        .where(eq(schema.transactions.id, id))
-        .get();
-      if (!existingTransaction) return null;
-
       const existingSplits = tx
         .select({
           id: schema.transactionSplits.id,
@@ -401,14 +411,26 @@ transactionsRouter.delete('/:id', async (c) => {
   const now = new Date().toISOString();
 
   const txn = await db
-    .select({ transferId: schema.transactions.transferId })
+    .select({
+      transferId: schema.transactions.transferId,
+      reconciled: schema.transactions.reconciled,
+    })
     .from(schema.transactions)
     .where(and(eq(schema.transactions.id, id), isNull(schema.transactions.deletedAt)))
     .get();
 
   if (!txn) return c.json({ error: 'not found' }, 404);
+  if (txn.reconciled) return c.json({ error: 'reconciled transactions cannot be deleted' }, 400);
 
   if (txn.transferId) {
+    const transferLegs = await db
+      .select({ reconciled: schema.transactions.reconciled })
+      .from(schema.transactions)
+      .where(and(eq(schema.transactions.transferId, txn.transferId), isNull(schema.transactions.deletedAt)));
+    if (transferLegs.some((leg) => leg.reconciled)) {
+      return c.json({ error: 'reconciled transfers cannot be deleted' }, 400);
+    }
+
     await db
       .update(schema.transactions)
       .set({ deletedAt: now })

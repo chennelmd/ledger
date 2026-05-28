@@ -148,7 +148,8 @@ dashboardRouter.get('/free-cash', async (c) => {
       .where(sql`${schema.budgets.month} <= ${month}`)
       .groupBy(schema.budgets.month, schema.budgets.categoryId),
 
-    // 6. Spending activity through current month
+    // 6. Spending activity. Cash balance is all-time, so posted future
+    // scheduled transactions must also reduce their envelope reserve here.
     db.select({
       month: sql<string>`strftime('%Y-%m', ${schema.transactions.date})`,
       categoryId: activityCategoryId,
@@ -159,7 +160,6 @@ dashboardRouter.get('/free-cash', async (c) => {
       .leftJoin(linkedDebtCategories, eq(linkedDebtCategories.linkedDebtAccountId, schema.transactionSplits.transferAccountId))
       .where(and(
         isNull(schema.transactions.deletedAt),
-        sql`strftime('%Y-%m', ${schema.transactions.date}) <= ${month}`,
       ))
       .groupBy(
         sql`strftime('%Y-%m', ${schema.transactions.date})`,
@@ -254,7 +254,7 @@ dashboardRouter.get('/free-cash', async (c) => {
   // ── Previous month free cash (for trend direction) ────────────────────────
 
   const prevAccountTxnMap = new Map(prevMonthAccountTxnSums.map((r) => [r.accountId, Number(r.net)]));
-  const prevCashBalanceCents = cashAccounts.reduce(
+  const prevCashBalanceCents = accounts.filter((a) => CASH_SUBTYPES.has(a.subtype)).reduce(
     (sum, a) => sum + a.startingBalanceCents + (prevAccountTxnMap.get(a.id) ?? 0),
     0,
   );

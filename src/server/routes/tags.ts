@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db, schema } from '../../db/client.js';
 
 export const tagsRouter = new Hono();
@@ -11,10 +11,12 @@ tagsRouter.get('/', async (c) => {
       id: schema.tags.id,
       name: schema.tags.name,
       color: schema.tags.color,
-      usageCount: sql<number>`count(${schema.splitTags.tagId})`,
+      usageCount: sql<number>`count(case when ${schema.splitTags.tagId} is not null and ${schema.transactions.deletedAt} is null then 1 end)`,
     })
     .from(schema.tags)
     .leftJoin(schema.splitTags, eq(schema.splitTags.tagId, schema.tags.id))
+    .leftJoin(schema.transactionSplits, eq(schema.splitTags.splitId, schema.transactionSplits.id))
+    .leftJoin(schema.transactions, eq(schema.transactionSplits.transactionId, schema.transactions.id))
     .groupBy(schema.tags.id)
     .orderBy(schema.tags.name);
 
@@ -50,7 +52,10 @@ tagsRouter.get('/:name', async (c) => {
     .leftJoin(schema.categories, eq(schema.transactionSplits.categoryId, schema.categories.id))
     .leftJoin(schema.payees, eq(schema.transactions.payeeId, schema.payees.id))
     .leftJoin(schema.accounts, eq(schema.transactions.accountId, schema.accounts.id))
-    .where(eq(schema.splitTags.tagId, tag.id))
+    .where(and(
+      eq(schema.splitTags.tagId, tag.id),
+      isNull(schema.transactions.deletedAt),
+    ))
     .orderBy(schema.transactions.date);
 
   return c.json({ tag, rows });

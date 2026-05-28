@@ -308,7 +308,7 @@ try {
   server.kill('SIGTERM');
 }
 
-/* 
+/*
 
 Key differences from the previous version:
 

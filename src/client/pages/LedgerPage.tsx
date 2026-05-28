@@ -20,6 +20,7 @@ interface TxnRow {
   transferAccountName: string | null;
   notes: string | null;
   cleared: boolean;
+  reconciled: boolean;
   splitAmountCents: number | null;
   splitNotes: string | null;
 }
@@ -861,11 +862,13 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                           type="checkbox"
                           style={S.clearedCheck}
                           checked={first.cleared}
+                          disabled={first.reconciled}
+                          title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
                           onChange={() => toggleCleared.mutate({ id: first.id, cleared: !first.cleared })}
                         />
                       </td>
                       <td style={{ ...S.td, whiteSpace: 'nowrap' }}>
-                        <button style={S.saveBtn} onClick={() => saveEdit(first)} disabled={editMutation.isPending}>
+                        <button style={S.saveBtn} onClick={() => saveEdit(first)} disabled={editMutation.isPending || first.reconciled}>
                           Save
                         </button>{' '}
                         <button style={S.cancelBtn} onClick={() => { setEditingId(null); setEditForm(null); }}>
@@ -1002,14 +1005,28 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                           type="checkbox"
                           style={S.clearedCheck}
                           checked={first.cleared}
+                          disabled={first.reconciled}
+                          title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
                           onChange={() => toggleCleared.mutate({ id: first.id, cleared: !first.cleared })}
                         />
                       </td>
                       <td style={{ ...S.td, whiteSpace: 'nowrap', padding: '11px 8px' }}>
-                        <button style={S.iconBtn} onClick={() => startEdit(first)} aria-label="Edit">
+                        <button
+                          style={S.iconBtn}
+                          onClick={() => startEdit(first)}
+                          aria-label="Edit"
+                          disabled={first.reconciled}
+                          title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
+                        >
                           <Pencil size={13} />
                         </button>
-                        <button style={S.iconBtnDanger} onClick={() => handleDelete(first.id)} aria-label="Delete">
+                        <button
+                          style={S.iconBtnDanger}
+                          onClick={() => handleDelete(first.id)}
+                          aria-label="Delete"
+                          disabled={first.reconciled}
+                          title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
+                        >
                           <Trash2 size={13} />
                         </button>
                       </td>
@@ -1075,14 +1092,28 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         type="checkbox"
                         style={S.clearedCheck}
                         checked={first.cleared}
+                        disabled={first.reconciled}
+                        title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
                         onChange={() => toggleCleared.mutate({ id: first.id, cleared: !first.cleared })}
                       />
                     </td>
                     <td style={{ ...S.td, whiteSpace: 'nowrap', padding: '11px 8px' }}>
-                      <button style={S.iconBtn} onClick={() => startEdit(first)} aria-label="Edit">
+                      <button
+                        style={S.iconBtn}
+                        onClick={() => startEdit(first)}
+                        aria-label="Edit"
+                        disabled={first.reconciled}
+                        title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
+                      >
                         <Pencil size={13} />
                       </button>
-                      <button style={S.iconBtnDanger} onClick={() => handleDelete(first.id)} aria-label="Delete">
+                      <button
+                        style={S.iconBtnDanger}
+                        onClick={() => handleDelete(first.id)}
+                        aria-label="Delete"
+                        disabled={first.reconciled}
+                        title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
+                      >
                         <Trash2 size={13} />
                       </button>
                     </td>

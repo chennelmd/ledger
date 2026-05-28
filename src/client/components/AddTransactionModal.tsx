@@ -343,7 +343,7 @@ export function AddTransactionModal({ onClose, defaultAccountId }: Props) {
 
   function removeSplit(i: number) {
     const next = splits.filter((_, idx) => idx !== i);
-    setSplits(next.length > 0 ? next : [{ amount: '', categoryId: '' }]);
+    setSplits(next.length > 0 ? next : [{ amount: '', categoryId: '', tags: [] }]);
   }
 
   function updateSplit(i: number, field: 'amount' | 'categoryId', value: string) {
