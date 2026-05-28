@@ -31,14 +31,14 @@ budgetRouter.get('/:month', async (c) => {
     onBudgetAccounts,
     onBudgetTxnSums,
   ] = await Promise.all([
-    // 1. Visible category groups
+    // 1. Visible, non-deleted category groups
     db.select().from(schema.categoryGroups)
-      .where(eq(schema.categoryGroups.isHidden, false))
+      .where(and(isNull(schema.categoryGroups.deletedAt), eq(schema.categoryGroups.isHidden, false)))
       .orderBy(schema.categoryGroups.sortOrder),
 
-    // 2. Visible categories
+    // 2. Visible, non-deleted categories
     db.select().from(schema.categories)
-      .where(eq(schema.categories.isHidden, false))
+      .where(and(isNull(schema.categories.deletedAt), eq(schema.categories.isHidden, false)))
       .orderBy(schema.categories.sortOrder),
 
     // 3. This month's assignment rows — drives the editable Assigned column
@@ -146,6 +146,10 @@ budgetRouter.get('/:month', async (c) => {
   const carryoverMap = new Map<string, number>(); // categoryId → balance carried into current month
   for (const m of priorMonths) {
     for (const cat of cats) {
+      // Income categories carry no balance forward — their available is always just
+      // "received this month." Skipping them here prevents stale activity from leaking
+      // into future months if this loop is ever extended.
+      if (cat.isIncome) continue;
       const assigned = assignedByMonth.get(m)?.get(cat.id) ?? 0;
       const activity = activityByMonth.get(m)?.get(cat.id) ?? 0;
       const prior    = carryoverMap.get(cat.id) ?? 0;

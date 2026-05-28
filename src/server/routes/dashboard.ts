@@ -132,6 +132,8 @@ dashboardRouter.get('/free-cash', async (c) => {
       .from(schema.categories)
       .innerJoin(schema.categoryGroups, eq(schema.categories.groupId, schema.categoryGroups.id))
       .where(and(
+        isNull(schema.categories.deletedAt),
+        isNull(schema.categoryGroups.deletedAt),
         eq(schema.categories.isHidden, false),
         eq(schema.categoryGroups.isHidden, false),
         eq(schema.categoryGroups.isIncome, false),
@@ -335,14 +337,22 @@ dashboardRouter.get('/free-cash', async (c) => {
     }
   }
 
-  // Include all positive envelopes (regular + debt) in the prev-month net for a consistent trend signal.
-  const prevReservedCents = cats.reduce((sum, cat) => {
-    const avail = prevBalanceMap.get(cat.id) ?? 0;
-    return avail > 0 ? sum + avail : sum;
-  }, 0);
+  // Mirror the current-month two-bucket split: regular envelopes use cumulative balance;
+  // debt envelopes use the prior-month assignment (same proxy used for current month).
+  let prevReservedCents = 0;
+  let prevDebtPaymentCents = 0;
+  for (const cat of cats) {
+    if (cat.linkedDebtAccountId) {
+      const assigned = assignedByMonth.get(prevMonth)?.get(cat.id) ?? 0;
+      if (assigned > 0) prevDebtPaymentCents += assigned;
+    } else {
+      const avail = prevBalanceMap.get(cat.id) ?? 0;
+      if (avail > 0) prevReservedCents += avail;
+    }
+  }
 
   // Excludes scheduled outflows — those change window-to-window and would make trend noisy.
-  const prevMonthNetCents = prevCashBalanceCents - prevReservedCents;
+  const prevMonthNetCents = prevCashBalanceCents - prevReservedCents - prevDebtPaymentCents;
 
   return c.json({
     month,
@@ -369,7 +379,7 @@ dashboardRouter.get('/debt', async (c) => {
   const month = c.req.query('month') ?? currentMonth();
   if (!isMonth(month)) return c.json({ error: 'month must be YYYY-MM' }, 400);
 
-  // 1. On-budget liability accounts
+  // 1. On-budget, open liability accounts
   const debtAccounts = await db
     .select()
     .from(schema.accounts)
@@ -377,6 +387,7 @@ dashboardRouter.get('/debt', async (c) => {
       isNull(schema.accounts.deletedAt),
       eq(schema.accounts.isOnBudget, true),
       eq(schema.accounts.type, 'liability'),
+      eq(schema.accounts.isClosed, false),
     ));
 
   if (debtAccounts.length === 0) {
@@ -415,21 +426,29 @@ dashboardRouter.get('/debt', async (c) => {
 
   const debtCatByAccountId = new Map(debtCategories.map((c) => [c.linkedDebtAccountId!, c]));
 
-  // 4. This month's budget assignment for each debt category
+  // 4. This month's budget assignment for each debt category — aggregate with SUM/GROUP BY
+  // so that if the budgets table ever contains duplicate rows for the same month+category
+  // (no unique constraint enforced), they are summed rather than clobbering each other.
   const catIds = debtCategories.map((c) => c.id);
   const assignments = catIds.length > 0
     ? await db
-        .select({ categoryId: schema.budgets.categoryId, assignedCents: schema.budgets.assignedCents })
+        .select({
+          categoryId: schema.budgets.categoryId,
+          assignedCents: sql<number>`coalesce(sum(${schema.budgets.assignedCents}), 0)`,
+        })
         .from(schema.budgets)
         .where(and(eq(schema.budgets.month, month), inArray(schema.budgets.categoryId, catIds)))
+        .groupBy(schema.budgets.categoryId)
     : [];
 
-  const assignmentMap = new Map(assignments.map((r) => [r.categoryId, r.assignedCents]));
+  const assignmentMap = new Map(assignments.map((r) => [r.categoryId, Number(r.assignedCents)]));
 
   // 5. Assemble per-account response
   const accounts = debtAccounts.map((account) => {
     const balanceCents = account.startingBalanceCents + (txnSumMap.get(account.id) ?? 0);
-    const owedCents = Math.abs(balanceCents);
+    // Math.max(0, -balance): a negative balance means money owed; a positive balance
+    // (overpaid card) means the user is owed money — owed debt is zero in that case.
+    const owedCents = Math.max(0, -balanceCents);
     const debtCat = debtCatByAccountId.get(account.id) ?? null;
     const monthlyPaymentCents = debtCat ? (assignmentMap.get(debtCat.id) ?? 0) : 0;
 

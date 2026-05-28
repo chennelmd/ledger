@@ -113,9 +113,19 @@ function computePayoff(
   const months = Math.ceil(
     -Math.log(1 - (r * owedCents) / paymentCents) / Math.log(1 + r)
   );
+  // Simulate payoff to get exact total interest — the closed-form PMT*months−P
+  // overstates because the final payment is partial, not a full PMT.
+  let bal = owedCents;
+  let totalInterestCents = 0;
+  for (let i = 0; i < months; i++) {
+    const interest = Math.round(bal * r);
+    totalInterestCents += interest;
+    bal = bal + interest - paymentCents;
+    if (bal <= 0) break;
+  }
   return {
     months,
-    interestCents: Math.round(paymentCents * months - owedCents),
+    interestCents: Math.max(0, totalInterestCents),
     monthlyInterestCents,
   };
 }
@@ -131,8 +141,12 @@ function computePromoPayoff(
 
   const now = new Date();
   const end = new Date(promoEndDate + 'T12:00:00');
+  // Subtract 1 when the promo-end day-of-month has already passed this month —
+  // e.g. today May 28, end June 1 → 1 raw month but only 4 days left → 0 full cycles.
   const promoMonthsLeft = Math.max(0,
-    (end.getFullYear() - now.getFullYear()) * 12 + (end.getMonth() - now.getMonth()),
+    (end.getFullYear() - now.getFullYear()) * 12 +
+    (end.getMonth() - now.getMonth()) +
+    (end.getDate() < now.getDate() ? -1 : 0),
   );
 
   const promoR = (promoApr ?? 0) / 12;
@@ -191,7 +205,16 @@ function computePromoPayoff(
   }
 
   const stdMonths = Math.ceil(-Math.log(1 - (stdR * balanceAtPromoEnd) / paymentCents) / Math.log(1 + stdR));
-  const stdInterest = Math.max(0, Math.round(paymentCents * stdMonths - balanceAtPromoEnd));
+  // Simulate phase-2 payoff for exact interest (same reason as computePayoff — final payment is partial).
+  let bal2 = balanceAtPromoEnd;
+  let stdInterest = 0;
+  for (let i = 0; i < stdMonths; i++) {
+    const interest = Math.round(bal2 * stdR);
+    stdInterest += interest;
+    bal2 = bal2 + interest - paymentCents;
+    if (bal2 <= 0) break;
+  }
+  stdInterest = Math.max(0, stdInterest);
 
   return {
     promoMonthsLeft,
