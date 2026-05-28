@@ -87,17 +87,30 @@ budgetRouter.get('/:month', async (c) => {
         activityCategoryId,
       ),
 
-    // 7. On-budget accounts (for RTA)
+    // 7. On-budget ASSET accounts only (for RTA).
+    // Liability balances represent debt, not spendable money — they're tracked on the Debt
+    // page where debt categories live. Including them here would push RTA deeply negative
+    // with no way for the user to offset it via budget assignments.
     db.select({ id: schema.accounts.id, startingBalanceCents: schema.accounts.startingBalanceCents })
       .from(schema.accounts)
-      .where(and(isNull(schema.accounts.deletedAt), eq(schema.accounts.isOnBudget, true))),
+      .where(and(
+        isNull(schema.accounts.deletedAt),
+        eq(schema.accounts.isOnBudget, true),
+        eq(schema.accounts.type, 'asset'),
+      )),
 
-    // 8. Transaction sums per account (for RTA)
+    // 8. Transaction sums for on-budget asset accounts only (for RTA)
     db.select({
       accountId: schema.transactions.accountId,
       net: sql<number>`coalesce(sum(${schema.transactions.amountCents}), 0)`,
     })
       .from(schema.transactions)
+      .innerJoin(schema.accounts, and(
+        eq(schema.transactions.accountId, schema.accounts.id),
+        isNull(schema.accounts.deletedAt),
+        eq(schema.accounts.isOnBudget, true),
+        eq(schema.accounts.type, 'asset'),
+      ))
       .where(isNull(schema.transactions.deletedAt))
       .groupBy(schema.transactions.accountId),
   ]);

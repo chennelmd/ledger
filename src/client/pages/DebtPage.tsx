@@ -34,6 +34,15 @@ interface PayoffResult {
   monthlyInterestCents: number;
 }
 
+interface PromoPayoff {
+  promoMonthsLeft: number;
+  balanceAtPromoEnd: number;        // cents remaining when promo expires
+  minPaymentToClearInPromo: number; // monthly payment to clear balance before promo ends (cents)
+  isOnTrack: boolean;
+  totalMonths: number | null;       // null = payment won't cover standard rate interest
+  totalInterestCents: number;
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 const fmt$ = (cents: number) =>
@@ -97,6 +106,89 @@ function computePayoff(
     months,
     interestCents: Math.round(paymentCents * months - owedCents),
     monthlyInterestCents,
+  };
+}
+
+function computePromoPayoff(
+  owedCents: number,
+  promoApr: number | null,
+  standardApr: number,
+  promoEndDate: string,
+  paymentCents: number,
+): PromoPayoff | null {
+  if (owedCents <= 0 || paymentCents <= 0) return null;
+
+  const now = new Date();
+  const end = new Date(promoEndDate + 'T12:00:00');
+  const promoMonthsLeft = Math.max(0,
+    (end.getFullYear() - now.getFullYear()) * 12 + (end.getMonth() - now.getMonth()),
+  );
+
+  const promoR = (promoApr ?? 0) / 12;
+
+  // Payment needed to clear during promo (amortization formula, or simple division at 0%)
+  let minPaymentToClearInPromo: number;
+  if (promoMonthsLeft <= 0) {
+    minPaymentToClearInPromo = owedCents;
+  } else if (promoR === 0) {
+    minPaymentToClearInPromo = Math.ceil(owedCents / promoMonthsLeft);
+  } else {
+    minPaymentToClearInPromo = Math.ceil(
+      (owedCents * promoR) / (1 - Math.pow(1 + promoR, -promoMonthsLeft)),
+    );
+  }
+
+  // Phase 1: simulate payments at promo APR for promoMonthsLeft months
+  let balance = owedCents;
+  let totalInterest = 0;
+  for (let i = 0; i < promoMonthsLeft; i++) {
+    const interest = Math.round(balance * promoR);
+    totalInterest += interest;
+    balance = balance + interest - paymentCents;
+    if (balance <= 0) {
+      return {
+        promoMonthsLeft,
+        balanceAtPromoEnd: 0,
+        minPaymentToClearInPromo,
+        isOnTrack: true,
+        totalMonths: i + 1,
+        totalInterestCents: Math.max(0, totalInterest),
+      };
+    }
+  }
+
+  const balanceAtPromoEnd = Math.max(0, balance);
+  const isOnTrack = paymentCents >= minPaymentToClearInPromo;
+
+  if (balanceAtPromoEnd <= 0) {
+    return { promoMonthsLeft, balanceAtPromoEnd: 0, minPaymentToClearInPromo, isOnTrack: true, totalMonths: promoMonthsLeft, totalInterestCents: Math.max(0, totalInterest) };
+  }
+
+  // Phase 2: standard rate for remaining balance
+  const stdR = standardApr / 12;
+  if (stdR <= 0) {
+    return {
+      promoMonthsLeft, balanceAtPromoEnd, minPaymentToClearInPromo, isOnTrack,
+      totalMonths: promoMonthsLeft + Math.ceil(balanceAtPromoEnd / paymentCents),
+      totalInterestCents: Math.max(0, totalInterest),
+    };
+  }
+
+  const monthlyStdInterest = Math.round(balanceAtPromoEnd * stdR);
+  if (paymentCents <= monthlyStdInterest) {
+    return { promoMonthsLeft, balanceAtPromoEnd, minPaymentToClearInPromo, isOnTrack, totalMonths: null, totalInterestCents: totalInterest };
+  }
+
+  const stdMonths = Math.ceil(-Math.log(1 - (stdR * balanceAtPromoEnd) / paymentCents) / Math.log(1 + stdR));
+  const stdInterest = Math.max(0, Math.round(paymentCents * stdMonths - balanceAtPromoEnd));
+
+  return {
+    promoMonthsLeft,
+    balanceAtPromoEnd,
+    minPaymentToClearInPromo,
+    isOnTrack,
+    totalMonths: promoMonthsLeft + stdMonths,
+    totalInterestCents: Math.max(0, totalInterest + stdInterest),
   };
 }
 
@@ -368,6 +460,20 @@ function AccountCard({ account, month }: { account: DebtAccount; month: string }
     [account.owedCents, account.apr, localPaymentCents]
   );
 
+  // Two-phase payoff for promotional accounts: promo-rate period → standard-rate period.
+  const promoPayoff = useMemo(() => {
+    if (!account.promoEndDate || account.standardApr === null) return null;
+    if (new Date(account.promoEndDate + 'T12:00:00') <= new Date()) return null;
+    if (localPaymentCents <= 0) return null;
+    return computePromoPayoff(
+      account.owedCents, account.apr, account.standardApr,
+      account.promoEndDate, localPaymentCents,
+    );
+  }, [account.owedCents, account.apr, account.standardApr, account.promoEndDate, localPaymentCents]);
+
+  const hasActivePromo = account.promoEndDate !== null && account.standardApr !== null &&
+    new Date((account.promoEndDate ?? '') + 'T12:00:00') > new Date();
+
   const monoStyle: React.CSSProperties = {
     fontFamily: "'JetBrains Mono', monospace",
     fontVariantNumeric: 'tabular-nums',
@@ -520,28 +626,29 @@ function AccountCard({ account, month }: { account: DebtAccount; month: string }
             </div>
           )}
 
-          {account.standardApr !== null &&
-            account.apr !== null &&
-            account.apr !== account.standardApr &&
-            account.promoEndDate !== null && (
-              <div
-                style={{
-                  fontSize: 11,
-                  color: '#78716C',
-                  background: '#F5EFE6',
-                  border: '1px solid #E7DFD0',
-                  padding: '4px 8px',
-                  marginBottom: 10,
-                }}
-              >
-                Promo: {fmtPct(account.apr)} → {fmtPct(account.standardApr)} after{' '}
-                {new Date(account.promoEndDate).toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
-              </div>
-            )}
+          {account.standardApr !== null && account.promoEndDate !== null && (
+            <div
+              style={{
+                fontSize: 11,
+                color: hasActivePromo ? '#92400E' : '#78716C',
+                background: hasActivePromo ? '#FFFBEB' : '#F5EFE6',
+                border: hasActivePromo ? '1px solid #FDE68A' : '1px solid #E7DFD0',
+                padding: '4px 8px',
+                marginBottom: 10,
+              }}
+            >
+              Promo: {fmtPct(account.apr ?? 0)} → {fmtPct(account.standardApr)} after{' '}
+              {new Date(account.promoEndDate).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              })}
+              {promoPayoff && promoPayoff.promoMonthsLeft > 0 && (
+                <> · <strong>{promoPayoff.promoMonthsLeft} month{promoPayoff.promoMonthsLeft !== 1 ? 's' : ''} left</strong></>
+              )}
+              {!hasActivePromo && <> · expired</>}
+            </div>
+          )}
 
           <div style={detailLabelStyle}>Min Payment</div>
           <div style={detailValueStyle}>
@@ -575,10 +682,66 @@ function AccountCard({ account, month }: { account: DebtAccount; month: string }
         <div>
           <div style={colLabelStyle}>Payoff Projection</div>
 
-          {!account.apr && account.apr !== 0 ? (
-            <div style={infoStyle}>Add APR to see interest breakdown</div>
-          ) : localPaymentCents <= 0 ? (
+          {localPaymentCents <= 0 ? (
             <div style={infoStyle}>Set a monthly payment to see payoff timeline</div>
+          ) : promoPayoff ? (
+            // Two-phase projection for active promotional accounts
+            <>
+              <div style={detailLabelStyle}>
+                Monthly interest (promo)
+                <Tip content="Interest accruing now at the promotional rate. After the promo expires, this jumps to the standard APR." />
+              </div>
+              <div style={detailValueStyle}>
+                {fmt$(payoff?.monthlyInterestCents ?? 0)}/mo
+              </div>
+
+              <div style={detailLabelStyle}>
+                Principal paid
+                <Tip content="The portion of your payment that actually reduces the balance: Monthly Payment − Monthly Interest." />
+              </div>
+              <div style={detailValueStyle}>
+                {principalPaidCents !== null ? `${fmt$(principalPaidCents)}/mo` : '—'}
+              </div>
+
+              <div style={detailLabelStyle}>
+                To clear before promo ends
+                <Tip content="The minimum monthly payment required to pay off this balance before the promotional rate expires. If you pay less, the remaining balance switches to the standard (higher) APR." />
+              </div>
+              <div style={{ ...detailValueStyle, color: promoPayoff.isOnTrack ? '#365142' : '#B45309' }}>
+                {fmt$(promoPayoff.minPaymentToClearInPromo)}/mo
+                {promoPayoff.isOnTrack && <span style={{ fontSize: 11, marginLeft: 6 }}>✓ on track</span>}
+              </div>
+
+              {!promoPayoff.isOnTrack && promoPayoff.balanceAtPromoEnd > 0 && (
+                <div style={{ ...warningStyle, marginBottom: 10 }}>
+                  {fmt$(promoPayoff.balanceAtPromoEnd)} remaining at promo end — then {fmtPct(account.standardApr!)} APR applies
+                </div>
+              )}
+
+              <div style={detailLabelStyle}>
+                Paid off in
+                <Tip content="Total months to full payoff using a two-phase calculation: payments at the promo rate until expiry, then at the standard rate for the remaining balance." />
+              </div>
+              {promoPayoff.totalMonths === null ? (
+                <div style={warningStyle}>Payment won't cover standard rate interest — increase budget</div>
+              ) : (
+                <div style={{ ...detailValueStyle, color: '#365142' }}>
+                  {promoPayoff.totalMonths === 0
+                    ? 'Already paid'
+                    : `${promoPayoff.totalMonths} month${promoPayoff.totalMonths === 1 ? '' : 's'} · ${payoffDate(promoPayoff.totalMonths)}`}
+                </div>
+              )}
+
+              <div style={detailLabelStyle}>
+                Total interest
+                <Tip content="Combined interest across both phases. If paid off during the promo period, this is $0. Otherwise it includes the interest on the balance remaining after the promo rate expires." />
+              </div>
+              <div style={{ ...detailValueStyle, color: promoPayoff.totalInterestCents > 0 ? '#7A1F2B' : '#365142' }}>
+                {fmt$(promoPayoff.totalInterestCents)}
+              </div>
+            </>
+          ) : !account.apr && account.apr !== 0 ? (
+            <div style={infoStyle}>Add APR to see interest breakdown</div>
           ) : payoff === null ? (
             <div style={warningStyle}>
               Payment doesn't cover interest — increase your monthly budget
@@ -652,18 +815,29 @@ function SummaryBar({ data }: { data: DebtResponse }) {
         ) / totalOwedWithApr
       : null;
 
-  // Latest payoff date
+  // Latest payoff date — use two-phase calculation for active promo accounts
   let debtFreeLabel = '—';
   let canCompute = true;
   let maxMonths = 0;
+  const now = new Date();
   for (const acct of data.accounts) {
     if (acct.owedCents <= 0) continue;
-    const p = computePayoff(acct.owedCents, acct.apr, acct.monthlyPaymentCents);
-    if (p === null) {
-      canCompute = false;
-      break;
+    const isActivePromo =
+      acct.promoEndDate !== null &&
+      acct.standardApr !== null &&
+      new Date((acct.promoEndDate ?? '') + 'T12:00:00') > now;
+
+    let months: number | null;
+    if (isActivePromo && acct.standardApr !== null && acct.promoEndDate !== null) {
+      const pp = computePromoPayoff(acct.owedCents, acct.apr, acct.standardApr, acct.promoEndDate, acct.monthlyPaymentCents);
+      months = pp?.totalMonths ?? null;
+    } else {
+      const p = computePayoff(acct.owedCents, acct.apr, acct.monthlyPaymentCents);
+      months = p?.months ?? null;
     }
-    if (p.months > maxMonths) maxMonths = p.months;
+
+    if (months === null) { canCompute = false; break; }
+    if (months > maxMonths) maxMonths = months;
   }
   if (canCompute && data.accounts.some((a) => a.owedCents > 0)) {
     debtFreeLabel = payoffDate(maxMonths);

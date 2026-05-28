@@ -187,16 +187,14 @@ accountsRouter.post('/', async (c) => {
   const now = new Date().toISOString();
 
   const inserted = db.transaction((tx) => {
-    // Resolve the debt category for this account. Priority: explicit startingBalanceCategoryId,
-    // then linkedDebtCategoryId, then auto-create. Auto-creation fires for every on-budget
-    // liability that arrives without a category — zero-balance new cards included — so the
-    // Carrying Debt envelope always exists from day one.
     let resolvedDebtCategoryId = startingBalanceCategoryId ?? linkedDebtCategoryId ?? null;
-
     const isOnBudgetLiability = accountData.isOnBudget && accountData.type === 'liability';
+    const needsAutoCategory = !resolvedDebtCategoryId && isOnBudgetLiability;
 
-    if (!resolvedDebtCategoryId && isOnBudgetLiability) {
-      // Find or create the "Debt Payments" category group.
+    // Step 1: find/create the "Debt Payments" group if needed — safe before account exists
+    // because categoryGroups has no FK reference to accounts.
+    let debtGroupId: string | undefined;
+    if (needsAutoCategory) {
       let debtGroup = tx
         .select()
         .from(schema.categoryGroups)
@@ -214,33 +212,15 @@ accountsRouter.post('/', async (c) => {
           .returning()
           .get();
       }
-
-      const maxCatSort = tx
-        .select({ v: sql<number>`coalesce(max(${schema.categories.sortOrder}), 0)` })
-        .from(schema.categories)
-        .where(and(eq(schema.categories.groupId, debtGroup.id), isNull(schema.categories.deletedAt)))
-        .get();
-
-      const cat = tx
-        .insert(schema.categories)
-        .values({
-          id: nanoid(),
-          groupId: debtGroup.id,
-          name: `Bank Card Debt – ${accountData.name}`,
-          rolloverOverspending: true,
-          linkedDebtAccountId: id,
-          sortOrder: (maxCatSort?.v ?? 0) + 1,
-        })
-        .returning()
-        .get();
-
-      resolvedDebtCategoryId = cat.id;
+      debtGroupId = debtGroup.id;
     }
 
+    // Step 2: insert the account so the FK on categories.linkedDebtAccountId is satisfiable.
+    const willHaveDebtCategory = needsAutoCategory || !!resolvedDebtCategoryId;
     const needsStartingBalanceTx =
       isOnBudgetLiability &&
       accountData.startingBalanceCents !== 0 &&
-      !!resolvedDebtCategoryId;
+      willHaveDebtCategory;
 
     const account = tx
       .insert(schema.accounts)
@@ -252,7 +232,32 @@ accountsRouter.post('/', async (c) => {
       .returning()
       .get();
 
-    if (needsStartingBalanceTx) {
+    // Step 3: auto-create the "Bank Card Debt" category now that the account row exists.
+    if (needsAutoCategory && debtGroupId) {
+      const maxCatSort = tx
+        .select({ v: sql<number>`coalesce(max(${schema.categories.sortOrder}), 0)` })
+        .from(schema.categories)
+        .where(and(eq(schema.categories.groupId, debtGroupId), isNull(schema.categories.deletedAt)))
+        .get();
+
+      const cat = tx
+        .insert(schema.categories)
+        .values({
+          id: nanoid(),
+          groupId: debtGroupId,
+          name: `Bank Card Debt – ${accountData.name}`,
+          rolloverOverspending: true,
+          linkedDebtAccountId: id,
+          sortOrder: (maxCatSort?.v ?? 0) + 1,
+        })
+        .returning()
+        .get();
+
+      resolvedDebtCategoryId = cat.id;
+    }
+
+    // Step 4: post the starting-balance transaction against the resolved debt category.
+    if (needsStartingBalanceTx && resolvedDebtCategoryId) {
       const date = accountData.startingBalanceDate ?? new Date().toISOString().slice(0, 10);
       const txn = tx
         .insert(schema.transactions)
@@ -275,8 +280,7 @@ accountsRouter.post('/', async (c) => {
       }).run();
     }
 
-    // For user-selected categories, update the linkage. Auto-created categories already
-    // have linkedDebtAccountId set at insert time and need no further update.
+    // Step 5: for user-selected categories, update the linkage.
     if (linkedDebtCategoryId) {
       tx.update(schema.categories)
         .set({ linkedDebtAccountId: null, updatedAt: now })
