@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "concurrently -k -n server,client -c blue,green \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "tsx watch src/server/index.ts",
-    "dev:client": "vite",
+    "dev:client": "vite --host 0.0.0.0",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist/server/index.js",
+    "db:backup": "node scripts/db-backup.mjs",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit"
@@ -17,7 +18,7 @@
     "@hono/node-server": "^1.13.7",
     "@tanstack/react-query": "^5.62.7",
     "@tanstack/react-router": "^1.87.0",
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^12.10.0",
     "date-fns": "^4.1.0",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.6.14",
@@ -31,7 +32,7 @@
   },
   "devDependencies": {
     "@tanstack/router-devtools": "^1.87.0",
-    "@types/better-sqlite3": "^7.6.12",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",

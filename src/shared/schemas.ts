@@ -42,6 +42,7 @@ export const NewAccountSchema = z.object({
   // Only used at creation time for on-budget liability accounts with non-zero starting balance.
   // The server converts the starting balance into a categorized transaction; this field names the category.
   startingBalanceCategoryId: z.string().nullable().optional(),
+  linkedDebtCategoryId: z.string().nullable().optional(),
 });
 
 export type NewAccountInput = z.infer<typeof NewAccountSchema>;
@@ -89,6 +90,8 @@ export type NewPayeeInput = z.infer<typeof NewPayeeSchema>;
 export const SplitInputSchema = z.object({
   amountCents: z.number().int(),
   categoryId: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  tags: z.array(z.string().min(1).max(50)).optional(),
 });
 
 export const NewTransactionSchema = z.object({
@@ -101,6 +104,7 @@ export const NewTransactionSchema = z.object({
   splits: z.array(SplitInputSchema).optional(),
   notes: z.string().nullable().optional(),
   cleared: z.boolean().default(false),
+  tags: z.array(z.string().min(1).max(50)).optional(),
 });
 
 export type NewTransactionInput = z.infer<typeof NewTransactionSchema>;
@@ -121,14 +125,44 @@ export type NewTransferInput = z.infer<typeof NewTransferSchema>;
 export const TransferUpdateSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   amountCents: z.number().int().positive().optional(),
+  notes: z.string().nullable().optional(),
 });
 
 export type TransferUpdateInput = z.infer<typeof TransferUpdateSchema>;
+
+// ─── Schedules ───────────────────────────────────────────────────────────────
+
+export const NewScheduleFieldsSchema = z.object({
+  name: z.string().min(1).max(120),
+  accountId: z.string().min(1),
+  categoryId: z.string().min(1).nullable().optional(),
+  transferAccountId: z.string().min(1).nullable().optional(),
+  amountCents: z.number().int(),
+  rrule: z.string().min(1),
+  nextOccurrence: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  isActive: z.boolean().default(true),
+  autoPost: z.boolean().default(false),
+  notes: z.string().nullable().optional(),
+});
+
+export const NewScheduleSchema = NewScheduleFieldsSchema.refine((data) => Boolean(data.categoryId) !== Boolean(data.transferAccountId), {
+  message: 'schedule requires either a category or transfer account',
+}).refine((data) => !data.transferAccountId || data.accountId !== data.transferAccountId, {
+  message: 'cannot transfer to the same account',
+});
+
+export type NewScheduleInput = z.infer<typeof NewScheduleSchema>;
 
 // ─── Budget ───────────────────────────────────────────────────────────────────
 
 export const BudgetAssignmentSchema = z.object({
   assignedCents: z.number().int().min(0),
+});
+
+// ─── Reconciliation ───────────────────────────────────────────────────────────
+
+export const ReconcileSchema = z.object({
+  statementBalanceCents: z.number().int(),
 });
 
 export type BudgetAssignmentInput = z.infer<typeof BudgetAssignmentSchema>;

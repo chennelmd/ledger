@@ -1,14 +1,19 @@
 import { useState } from 'react';
 import { AccountsPage } from './pages/AccountsPage.js';
 import { BudgetPage } from './pages/BudgetPage.js';
+import { DashboardPage } from './pages/DashboardPage.js';
+import { HelpPage } from './pages/HelpPage.js';
 import { LedgerPage } from './pages/LedgerPage.js';
+import { SchedulesPage } from './pages/SchedulesPage.js';
 
-type View = 'accounts' | 'budget' | 'ledger';
+type View = 'dashboard' | 'accounts' | 'budget' | 'ledger' | 'schedules' | 'help';
 
 const NAV: { id: View; label: string }[] = [
+  { id: 'dashboard', label: 'Dashboard' },
   { id: 'accounts', label: 'Accounts' },
   { id: 'budget',   label: 'Budget' },
   { id: 'ledger',   label: 'Ledger' },
+  { id: 'schedules', label: 'Schedules' },
 ];
 
 export function App() {
@@ -20,8 +25,11 @@ export function App() {
     setView('ledger');
   }
 
+  const pageMaxWidth = view === 'budget' || view === 'ledger' ? 1180 : 900;
+
+
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto', padding: '48px 24px 80px' }}>
+    <div style={{ maxWidth: pageMaxWidth, margin: '0 auto', padding: '48px 24px 80px' }}>
       {/* Masthead */}
       <header style={{ marginBottom: 0 }}>
         <div style={{
@@ -76,13 +84,35 @@ export function App() {
             </button>
           );
         })}
+        <button
+          onClick={() => setView('help')}
+          style={{
+            background: 'none',
+            border: 'none',
+            borderBottom: view === 'help' ? '2px solid #1C1917' : '2px solid transparent',
+            marginBottom: -1,
+            marginLeft: 'auto',
+            padding: '8px 14px',
+            fontSize: 13,
+            fontWeight: view === 'help' ? 600 : 400,
+            color: view === 'help' ? '#1C1917' : '#A8A29E',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+          title="How this works"
+        >
+          ?
+        </button>
       </nav>
 
       {/* Page content */}
       <main style={{ paddingTop: 32 }}>
+        {view === 'dashboard' && <DashboardPage />}
         {view === 'accounts' && <AccountsPage onNavigateToLedger={navigateToLedger} />}
         {view === 'budget'   && <BudgetPage />}
         {view === 'ledger'   && <LedgerPage initialAccountId={ledgerAccountId} />}
+        {view === 'schedules' && <SchedulesPage />}
+        {view === 'help' && <HelpPage />}
       </main>
     </div>
   );

@@ -1,6 +1,6 @@
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Target } from 'lucide-react';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -11,6 +11,9 @@ interface BudgetCategory {
   assignedCents: number;
   activityCents: number;
   availableCents: number;
+  goalType: 'target_by_date' | 'monthly_minimum' | 'monthly_savings' | null;
+  goalAmountCents: number | null;
+  goalDate: string | null;
 }
 
 interface BudgetGroup {
@@ -112,13 +115,29 @@ async function patchCategory(id: string, patch: Record<string, unknown>) {
 
 // ─── column widths ────────────────────────────────────────────────────────────
 
-function colWidth(numMonths: number) {
-  return numMonths === 1 ? 120 : numMonths === 2 ? 108 : 88;
+function minMoneyColWidth(numMonths: number) {
+  return numMonths === 1 ? 112 : numMonths === 2 ? 96 : 78;
 }
 
-function gridTemplate(numMonths: number) {
-  const w = colWidth(numMonths);
-  return `1fr ${Array(3 * numMonths).fill(`${w}px`).join(' ')}`;
+function categoryColumnWidth(data?: BudgetMonth) {
+  const labels = data?.groups.flatMap((group) => [
+    group.name,
+    ...group.categories.map((category) => category.name),
+    'Total',
+  ]) ?? ['Total'];
+  const longest = labels.reduce((max, label) => Math.max(max, label.length), 0);
+  return Math.min(Math.max(Math.ceil(longest * 7.5) + 28, 96), 220);
+}
+
+function gridTemplate(numMonths: number, categoryWidth: number) {
+  const w = minMoneyColWidth(numMonths);
+  return `${categoryWidth}px ${Array(3 * numMonths).fill(`minmax(${w}px, 1fr)`).join(' ')}`;
+}
+
+function readStoredNumMonths(): 1 | 2 | 3 {
+  if (typeof window === 'undefined') return 1;
+  const stored = Number(window.localStorage.getItem('budget:numMonths'));
+  return stored === 2 || stored === 3 ? stored : 1;
 }
 
 // Vertical separator between month groups
@@ -166,6 +185,7 @@ const S = {
   }),
   // Group header
   groupBlock: { marginBottom: 24 },
+  groupGridWrap: { overflowX: 'visible' as const, paddingBottom: 2 },
   groupHeaderWrap: { borderBottom: '1px solid #1C1917' },
   groupNameArea: {
     display: 'flex', flexDirection: 'column' as const,
@@ -267,6 +287,13 @@ const S = {
 
 const availStyle = (cents: number): React.CSSProperties =>
   cents > 0 ? S.availablePositive : cents < 0 ? S.availableNegative : S.availableZero;
+
+const budgetGridStyle = (gridCols: string): React.CSSProperties => ({
+  display: 'grid',
+  gridTemplateColumns: gridCols,
+  minWidth: '100%',
+  width: '100%',
+});
 
 // ─── AssignedCell ─────────────────────────────────────────────────────────────
 
@@ -464,7 +491,7 @@ function GroupHeader({ group, months, gridCols }: {
 
   if (!multi) {
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: gridCols, padding: '6px 0', borderBottom: '1px solid #1C1917' }}>
+      <div style={{ ...budgetGridStyle(gridCols), padding: '6px 0', borderBottom: '1px solid #1C1917' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <EditableGroupName group={group} />
           <IncomeToggle group={group} />
@@ -479,7 +506,7 @@ function GroupHeader({ group, months, gridCols }: {
   return (
     <div style={S.groupHeaderWrap}>
       {/* Row 1: name + income | month labels (each spanning 3 cols) */}
-      <div style={{ display: 'grid', gridTemplateColumns: gridCols }}>
+      <div style={budgetGridStyle(gridCols)}>
         <div style={S.groupNameArea}>
           <EditableGroupName group={group} />
           <IncomeToggle group={group} />
@@ -498,7 +525,7 @@ function GroupHeader({ group, months, gridCols }: {
         ))}
       </div>
       {/* Row 2: empty | col sub-headers per month */}
-      <div style={{ display: 'grid', gridTemplateColumns: gridCols }}>
+      <div style={budgetGridStyle(gridCols)}>
         <div />
         {months.map((m, mi) => (
           <Fragment key={m}>
@@ -512,16 +539,279 @@ function GroupHeader({ group, months, gridCols }: {
   );
 }
 
+// ─── Goal helpers ────────────────────────────────────────────────────────────
+
+const GOAL_LABELS: Record<string, string> = {
+  target_by_date: 'Target by date',
+  monthly_minimum: 'Monthly minimum',
+  monthly_savings: 'Monthly savings',
+};
+
+function goalRatio(cat: BudgetCategory): number | null {
+  if (!cat.goalType || !cat.goalAmountCents || cat.goalAmountCents <= 0) return null;
+  if (cat.goalType === 'target_by_date') return cat.availableCents / cat.goalAmountCents;
+  // monthly_minimum / monthly_savings: track how much has been assigned this month
+  return cat.assignedCents / cat.goalAmountCents;
+}
+
+// ─── GoalProgressBar ─────────────────────────────────────────────────────────
+// Thin colored bar shown below the Available amount in the primary month column.
+// Clicking opens the goal editor.
+
+function GoalProgressBar({ cat, onEdit }: { cat: BudgetCategory; onEdit: () => void }) {
+  const ratio = goalRatio(cat);
+
+  if (!cat.goalType) {
+    return (
+      <button
+        onClick={onEdit}
+        style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          fontSize: 10, color: '#C5BDB5', letterSpacing: '0.06em',
+          textAlign: 'right', width: '100%', padding: '2px 0 0',
+          fontFamily: 'inherit',
+        }}
+        title="Set a goal for this category"
+      >
+        + goal
+      </button>
+    );
+  }
+
+  const pct    = Math.min(100, Math.max(0, (ratio ?? 0) * 100));
+  const barColor = pct >= 100 ? '#365142' : pct >= 75 ? '#856404' : '#7A1F2B';
+  const label  = cat.goalType === 'target_by_date'
+    ? `${Math.round(pct)}% of ${fmt$(cat.goalAmountCents!)}`
+    : `${fmt$(cat.assignedCents)} of ${fmt$(cat.goalAmountCents!)}/mo`;
+
+  return (
+    <div
+      onClick={onEdit}
+      title={`${GOAL_LABELS[cat.goalType]} · ${label} · click to edit`}
+      style={{ cursor: 'pointer', paddingTop: 4 }}
+    >
+      <div style={{ background: '#EDE7DC', height: 3, borderRadius: 2 }}>
+        <div style={{ background: barColor, height: 3, borderRadius: 2, width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── GoalModal ────────────────────────────────────────────────────────────────
+
+function GoalModal({ cat, onClose }: { cat: BudgetCategory; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [goalType, setGoalType] = useState(cat.goalType ?? '');
+  const [amount, setAmount]     = useState(cat.goalAmountCents ? (cat.goalAmountCents / 100).toFixed(2) : '');
+  const [date, setDate]         = useState(cat.goalDate ?? '');
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const mutation = useMutation({
+    mutationFn: (patch: Record<string, unknown>) => patchCategory(cat.id, patch),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); onClose(); },
+  });
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    mutation.mutate({
+      goalType: goalType || null,
+      goalAmountCents: amount ? Math.round(parseFloat(amount) * 100) : null,
+      goalDate: goalType === 'target_by_date' ? date || null : null,
+    });
+  }
+
+  function handleClear() {
+    mutation.mutate({ goalType: null, goalAmountCents: null, goalDate: null });
+  }
+
+  const MS: Record<string, React.CSSProperties> = {
+    overlay: {
+      position: 'fixed', inset: 0, background: 'rgba(28,25,23,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 50, padding: 24,
+    },
+    modal: {
+      background: '#FFFEF9', border: '1px solid #E7DFD0',
+      width: '100%', maxWidth: 360,
+    },
+    header: {
+      display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+      padding: '20px 24px 0',
+    },
+    title: {
+      fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 500,
+      letterSpacing: '-0.02em', color: '#1C1917', margin: 0,
+    },
+    body:  { padding: '16px 24px 24px' },
+    label: {
+      display: 'block', fontSize: 10.5, fontWeight: 600,
+      letterSpacing: '0.12em', textTransform: 'uppercase' as const,
+      color: '#78716C', marginBottom: 5,
+    },
+    row:   { marginBottom: 14 },
+    input: {
+      width: '100%', boxSizing: 'border-box' as const,
+      border: '1px solid #E7DFD0', background: '#FFFEF9',
+      padding: '8px 10px', fontSize: 13.5, color: '#1C1917',
+      outline: 'none', fontFamily: 'inherit',
+    },
+    footer: {
+      display: 'flex', justifyContent: 'space-between', gap: 8,
+      paddingTop: 16, borderTop: '1px solid #F0EADD', marginTop: 4,
+    },
+    btnClear:  { background: 'none', border: '1px solid #E7DFD0', padding: '7px 14px', fontSize: 12.5, color: '#7A1F2B', cursor: 'pointer', fontFamily: 'inherit' },
+    btnCancel: { background: 'none', border: '1px solid #E7DFD0', padding: '7px 14px', fontSize: 12.5, color: '#78716C', cursor: 'pointer', fontFamily: 'inherit' },
+    btnSave:   { background: '#1C1917', border: 'none', padding: '7px 18px', fontSize: 12.5, color: '#FBF8F1', cursor: 'pointer', fontFamily: 'inherit' },
+    catName:   { fontSize: 12, color: '#78716C', marginBottom: 14 },
+  };
+
+  return (
+    <div style={MS.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={MS.modal}>
+        <div style={MS.header}>
+          <h2 style={MS.title}>
+            <Target size={14} style={{ marginRight: 7, verticalAlign: 'middle', color: '#78716C' }} />
+            Goal
+          </h2>
+        </div>
+        <div style={MS.body}>
+          <div style={MS.catName}>{cat.name}</div>
+          <form onSubmit={handleSubmit}>
+            <div style={MS.row}>
+              <label style={MS.label} htmlFor="goal-type">Goal type</label>
+              <select
+                id="goal-type" style={MS.input} value={goalType}
+                onChange={(e) => setGoalType(e.target.value)}
+              >
+                <option value="">No goal</option>
+                <option value="target_by_date">Target by date — save $X by a date</option>
+                <option value="monthly_savings">Monthly savings — assign $X/month</option>
+                <option value="monthly_minimum">Monthly minimum — spend at least $X/month</option>
+              </select>
+            </div>
+
+            {goalType && (
+              <div style={MS.row}>
+                <label style={MS.label} htmlFor="goal-amount">
+                  {goalType === 'target_by_date' ? 'Target amount' : 'Monthly amount'}
+                </label>
+                <input
+                  id="goal-amount" style={MS.input} type="number"
+                  step="0.01" min="0" value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00" autoFocus
+                />
+              </div>
+            )}
+
+            {goalType === 'target_by_date' && (
+              <div style={MS.row}>
+                <label style={MS.label} htmlFor="goal-date">Target date</label>
+                <input
+                  id="goal-date" style={MS.input} type="date"
+                  value={date} onChange={(e) => setDate(e.target.value)}
+                />
+              </div>
+            )}
+
+            {mutation.isError && (
+              <p style={{ fontSize: 12, color: '#7A1F2B', marginBottom: 10 }}>
+                {(mutation.error as Error).message}
+              </p>
+            )}
+
+            <div style={MS.footer}>
+              <button
+                type="button" style={MS.btnClear}
+                onClick={handleClear} disabled={!cat.goalType || mutation.isPending}
+              >
+                Clear
+              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" style={MS.btnCancel} onClick={onClose}>Cancel</button>
+                <button type="submit" style={MS.btnSave} disabled={mutation.isPending}>
+                  {mutation.isPending ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CategoryRow ──────────────────────────────────────────────────────────────
+// Owns its own goalOpen state so each row manages its modal independently.
+
+function CategoryRow({ cat, group, months, getCatMonth, gridCols }: {
+  cat: BudgetCategory;
+  group: BudgetGroup;
+  months: string[];
+  getCatMonth: (catId: string, mi: number) => BudgetCategory | undefined;
+  gridCols: string;
+}) {
+  const [goalOpen, setGoalOpen] = useState(false);
+
+  return (
+    <>
+      <div
+        style={{ ...budgetGridStyle(gridCols), borderBottom: '1px solid #F0EADD', background: '#FBF8F1', alignItems: 'center', minHeight: 42 }}
+        data-budget-grid-row
+      >
+        <EditableCategoryName cat={cat} />
+        {months.map((m, mi) => {
+          const d      = getCatMonth(cat.id, mi);
+          const avail  = d?.availableCents ?? 0;
+          // Merge goal fields from primary cat (always present) with current-month budget values
+          const merged: BudgetCategory = d ? { ...cat, ...d } : cat;
+          return (
+            <Fragment key={m}>
+              <div style={mi > 0 ? MONTH_SEP : undefined}>
+                <AssignedCell
+                  month={m} categoryId={cat.id}
+                  assignedCents={d?.assignedCents ?? 0}
+                  isIncome={group.isIncome}
+                />
+              </div>
+              <div style={{ ...S.cellMono, ...S.activityCell }}>
+                {(d?.activityCents ?? 0) === 0 ? '—' : fmt$(d!.activityCents)}
+              </div>
+              <div style={{ paddingRight: 10, paddingTop: 6, paddingBottom: mi === 0 && !group.isIncome ? 4 : 6 }}>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: 'tabular-nums', fontSize: 13, textAlign: 'right', ...availStyle(avail) }}>
+                  {fmt$(avail)}
+                </div>
+                {mi === 0 && !group.isIncome && (
+                  <GoalProgressBar cat={merged} onEdit={() => setGoalOpen(true)} />
+                )}
+              </div>
+            </Fragment>
+          );
+        })}
+      </div>
+      {goalOpen && <GoalModal cat={cat} onClose={() => setGoalOpen(false)} />}
+    </>
+  );
+}
+
 // ─── BudgetPage ───────────────────────────────────────────────────────────────
 
 export function BudgetPage() {
   const qc = useQueryClient();
   const [month, setMonth] = useState(currentMonth());
-  const [numMonths, setNumMonths] = useState(1);
+  const [numMonths, setNumMonths] = useState<1 | 2 | 3>(readStoredNumMonths);
   const [newGroupName, setNewGroupName] = useState('');
 
+  useEffect(() => {
+    window.localStorage.setItem('budget:numMonths', String(numMonths));
+  }, [numMonths]);
+
   const months = Array.from({ length: numMonths }, (_, i) => shiftMonth(month, i));
-  const gridCols = gridTemplate(numMonths);
 
   const budgetResults = useQueries({
     queries: months.map((m) => ({
@@ -535,6 +825,7 @@ export function BudgetPage() {
   const isLoading = budgetResults.some((r) => r.isLoading);
   const queryError = budgetResults.find((r) => r.error)?.error;
   const ready = primaryData?.readyToAssignCents ?? 0;
+  const gridCols = gridTemplate(numMonths, categoryColumnWidth(primaryData));
 
   function getCatMonth(catId: string, mi: number): BudgetCategory | undefined {
     return allData[mi]?.groups.flatMap((g) => g.categories).find((c) => c.id === catId);
@@ -592,65 +883,47 @@ export function BudgetPage() {
 
         return (
           <div key={group.id} style={S.groupBlock}>
-            <GroupHeader group={group} months={months} gridCols={gridCols} />
+            <div style={S.groupGridWrap} data-budget-grid-wrap>
+              <GroupHeader group={group} months={months} gridCols={gridCols} />
 
-            <div style={{ border: '1px solid #E7DFD0', borderTop: 'none' }}>
-              {/* Category rows */}
-              {group.categories.map((cat) => (
-                <div
-                  key={cat.id}
-                  style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: '1px solid #F0EADD', background: '#FBF8F1', alignItems: 'center', minHeight: 42 }}
-                >
-                  <EditableCategoryName cat={cat} />
-                  {months.map((m, mi) => {
-                    const d = getCatMonth(cat.id, mi);
-                    const avail = d?.availableCents ?? 0;
-                    return (
-                      <Fragment key={m}>
-                        {/* wrapper div carries the month separator border */}
-                        <div style={mi > 0 ? MONTH_SEP : undefined}>
-                          <AssignedCell
-                            month={m} categoryId={cat.id}
-                            assignedCents={d?.assignedCents ?? 0}
-                            isIncome={group.isIncome}
-                          />
+              <div style={{ border: '1px solid #E7DFD0', borderTop: 'none', minWidth: '100%', width: '100%' }}>
+                {/* Category rows */}
+                {group.categories.map((cat) => (
+                  <CategoryRow
+                    key={cat.id}
+                    cat={cat}
+                    group={group}
+                    months={months}
+                    getCatMonth={getCatMonth}
+                    gridCols={gridCols}
+                  />
+                ))}
+
+                {/* Add category */}
+                <AddCategoryRow groupId={group.id} month={month} />
+
+                {/* Group totals */}
+                {group.categories.length > 0 && (
+                  <div style={{ ...budgetGridStyle(gridCols), ...S.totalsRow }}>
+                    <div style={{ ...S.catName, fontSize: 11, color: '#78716C', fontWeight: 600, letterSpacing: '0.04em', cursor: 'default' }}>
+                      Total
+                    </div>
+                    {totals.map((t, mi) => (
+                      <Fragment key={months[mi]}>
+                        <div style={{ ...S.cellMono, color: '#78716C', ...(mi > 0 ? MONTH_SEP : {}) }}>
+                          {t.assigned === 0 ? '—' : fmt$(t.assigned)}
                         </div>
-                        <div style={{ ...S.cellMono, ...S.activityCell }}>
-                          {(d?.activityCents ?? 0) === 0 ? '—' : fmt$(d!.activityCents)}
+                        <div style={{ ...S.cellMono, color: '#78716C' }}>
+                          {t.activity === 0 ? '—' : fmt$(t.activity)}
                         </div>
-                        <div style={{ ...S.cellMono, ...availStyle(avail) }}>
-                          {fmt$(avail)}
+                        <div style={{ ...S.cellMono, ...availStyle(t.available) }}>
+                          {fmt$(t.available)}
                         </div>
                       </Fragment>
-                    );
-                  })}
-                </div>
-              ))}
-
-              {/* Add category */}
-              <AddCategoryRow groupId={group.id} month={month} />
-
-              {/* Group totals */}
-              {group.categories.length > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: gridCols, ...S.totalsRow }}>
-                  <div style={{ ...S.catName, fontSize: 11, color: '#78716C', fontWeight: 600, letterSpacing: '0.04em', cursor: 'default' }}>
-                    Total
+                    ))}
                   </div>
-                  {totals.map((t, mi) => (
-                    <Fragment key={months[mi]}>
-                      <div style={{ ...S.cellMono, color: '#78716C', ...(mi > 0 ? MONTH_SEP : {}) }}>
-                        {t.assigned === 0 ? '—' : fmt$(t.assigned)}
-                      </div>
-                      <div style={{ ...S.cellMono, color: '#78716C' }}>
-                        {t.activity === 0 ? '—' : fmt$(t.activity)}
-                      </div>
-                      <div style={{ ...S.cellMono, ...availStyle(t.available) }}>
-                        {fmt$(t.available)}
-                      </div>
-                    </Fragment>
-                  ))}
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         );

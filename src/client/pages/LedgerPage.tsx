@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Pencil, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Pencil, Send, SkipForward, Trash2 } from 'lucide-react';
 import type { Account } from '../../db/schema.js';
 import { AddTransactionModal } from '../components/AddTransactionModal.js';
+import { ReconcileModal } from '../components/ReconcileModal.js';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -19,23 +20,43 @@ interface TxnRow {
   transferAccountName: string | null;
   notes: string | null;
   cleared: boolean;
+  reconciled: boolean;
   splitAmountCents: number | null;
+  splitNotes: string | null;
 }
 
 interface CategoryItem { id: string; name: string; }
 interface CategoryGroup { id: string; name: string; categories: CategoryItem[]; }
+type AccountRow = Account & { balanceCents: number };
+
+interface ScheduleRow {
+  id: string;
+  name: string;
+  accountId: string;
+  accountName: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+  transferAccountId: string | null;
+  transferAccountName: string | null;
+  amountCents: number;
+  nextOccurrence: string;
+  isActive: boolean;
+  notes: string | null;
+}
 
 interface EditForm {
   date: string;
   payeeName: string;
-  splits: Array<{ categoryId: string; amount: string }>;
+  notes: string;
+  splits: Array<{ categoryId: string; amount: string; notes: string }>;
   amount: string; // used for transfer edits only
   accountId: string;
+  amountType?: 'expense' | 'income';
 }
 
 // ─── api ─────────────────────────────────────────────────────────────────────
 
-async function fetchAccounts(): Promise<Account[]> {
+async function fetchAccounts(): Promise<AccountRow[]> {
   const res = await fetch('/api/accounts');
   if (!res.ok) throw new Error('failed to fetch accounts');
   return res.json();
@@ -51,6 +72,12 @@ async function fetchTransactions(accountId: string): Promise<TxnRow[]> {
 async function fetchCategories(): Promise<CategoryGroup[]> {
   const res = await fetch('/api/categories');
   if (!res.ok) throw new Error('failed to fetch categories');
+  return res.json();
+}
+
+async function fetchSchedules(): Promise<ScheduleRow[]> {
+  const res = await fetch('/api/schedules?days=7');
+  if (!res.ok) throw new Error('failed to fetch schedules');
   return res.json();
 }
 
@@ -80,6 +107,24 @@ async function patchTransfer(transferId: string, body: Record<string, unknown>) 
   return res.json();
 }
 
+async function postScheduleOccurrence(id: string) {
+  const res = await fetch(`/api/schedules/${id}/post`, { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? 'failed to post schedule');
+  }
+  return res.json();
+}
+
+async function skipScheduleOccurrence(id: string) {
+  const res = await fetch(`/api/schedules/${id}/skip`, { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? 'failed to skip schedule');
+  }
+  return res.json();
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 const fmt$ = (cents: number) =>
@@ -89,6 +134,16 @@ const fmtDate = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
+
+const todayIso = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const SPLIT_OPTION = '__split_transaction__';
 
 // ─── styles ──────────────────────────────────────────────────────────────────
 
@@ -115,6 +170,16 @@ const S = {
     border: 'none',
     color: '#FBF8F1',
     padding: '9px 18px',
+    fontSize: 12.5,
+    letterSpacing: '0.06em',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  reconcileBtn: {
+    background: 'none',
+    border: '1px solid #E7DFD0',
+    color: '#78716C',
+    padding: '8px 16px',
     fontSize: 12.5,
     letterSpacing: '0.06em',
     cursor: 'pointer',
@@ -172,6 +237,36 @@ const S = {
     display: 'inline-flex',
     alignItems: 'center',
   },
+  scheduleAction: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    color: '#A8A29E',
+    padding: 3,
+    display: 'inline-flex',
+    alignItems: 'center',
+  },
+  upcomingBadge: {
+    display: 'inline-block',
+    fontSize: 10.5,
+    fontWeight: 700,
+    letterSpacing: '0.04em',
+    color: '#6D28D9',
+    background: '#F1E8FF',
+    padding: '2px 6px',
+  },
+  pastDueBadge: {
+    color: '#7A1F2B',
+    background: '#F7E6E8',
+  },
+  dueTodayBadge: {
+    color: '#795300',
+    background: '#FFF3CC',
+  },
+  scheduleRow: {
+    background: '#F7F2EA',
+    opacity: 0.72,
+  },
   saveBtn: {
     background: '#1C1917',
     border: 'none',
@@ -211,6 +306,29 @@ const S = {
     color: '#1C1917',
     fontFamily: 'inherit',
   },
+  signedAmount: {
+    display: 'grid',
+    gridTemplateColumns: '26px minmax(0, 1fr)',
+    gap: 6,
+    alignItems: 'center',
+  },
+  signBtn: {
+    border: '1px solid #D6CFC6',
+    background: '#F5EFE6',
+    color: '#78716C',
+    height: 27,
+    width: 26,
+    padding: 0,
+    cursor: 'pointer',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 13,
+    lineHeight: 1,
+  },
+  signBtnIncome: {
+    color: '#2D5016',
+    background: '#F3F7ED',
+    borderColor: '#C8D8B8',
+  },
   editRow: { background: '#FEFAF4' },
   empty: {
     padding: 48,
@@ -226,7 +344,8 @@ const S = {
 export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: string }) {
   const qc = useQueryClient();
   const [accountId, setAccountId] = useState(initialAccountId);
-  const [showAdd, setShowAdd]     = useState(false);
+  const [showAdd, setShowAdd]         = useState(false);
+  const [showReconcile, setShowReconcile] = useState(false);
   const [editingId, setEditingId]         = useState<string | null>(null);
   const [editForm, setEditForm]           = useState<EditForm | null>(null);
   const [expandedSplits, setExpandedSplits] = useState<Set<string>>(new Set());
@@ -241,6 +360,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
 
   const { data: accounts }  = useQuery({ queryKey: ['accounts'], queryFn: fetchAccounts });
   const { data: groups }    = useQuery({ queryKey: ['categories'], queryFn: fetchCategories });
+  const { data: schedules } = useQuery({ queryKey: ['schedules', 7], queryFn: fetchSchedules });
   const { data: txns, isLoading, error } = useQuery({
     queryKey: ['transactions', accountId],
     queryFn: () => fetchTransactions(accountId),
@@ -271,6 +391,25 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
     },
   });
 
+  const postScheduleMutation = useMutation({
+    mutationFn: postScheduleOccurrence,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schedules'] });
+      qc.invalidateQueries({ queryKey: ['transactions'] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['budget'] });
+    },
+  });
+
+  const skipScheduleMutation = useMutation({
+    mutationFn: skipScheduleOccurrence,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schedules'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+
   // Escape cancels the active edit
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -286,21 +425,27 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       setEditForm({
         date: t.date,
         payeeName: '',
+        notes: t.notes ?? '',
         splits: [],
         amount: (Math.abs(t.amountCents) / 100).toFixed(2),
         accountId: t.accountId,
       });
     } else {
       const allSplitRows = txns!.filter(r => r.id === t.id);
+      const editSign = t.amountCents < 0 || (t.amountCents === 0 && (t.splitAmountCents ?? 0) < 0) ? -1 : 1;
+      const splits = allSplitRows.map(r => ({
+        categoryId: r.categoryId ?? '',
+        amount: (Math.abs(r.splitAmountCents ?? r.amountCents) / 100).toFixed(2),
+        notes: r.splitNotes ?? '',
+      }));
       setEditForm({
         date: t.date,
         payeeName: t.payeeName ?? '',
-        splits: allSplitRows.map(r => ({
-          categoryId: r.categoryId ?? '',
-          amount: ((r.splitAmountCents ?? r.amountCents) / 100).toFixed(2),
-        })),
+        notes: t.notes ?? '',
+        splits,
         amount: '',
         accountId: t.accountId,
+        amountType: editSign >= 0 ? 'income' : 'expense',
       });
     }
   }
@@ -311,21 +456,29 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
       const body: Record<string, unknown> = {
         date: editForm.date,
         amountCents: Math.round(parseFloat(editForm.amount) * 100),
+        notes: editForm.notes.trim() || null,
       };
       editMutation.mutate({ id: t.transferId, body, isTransfer: true });
     } else {
-      const parsedSplits = editForm.splits.map(s => ({
-        amountCents: Math.round(parseFloat(s.amount || '0') * 100),
-        categoryId: s.categoryId || null,
-      }));
+      const wasSplit = (txns?.filter(r => r.id === t.id).length ?? 0) > 1;
+      const sign = editForm.amountType === 'income' ? 1 : -1;
+      const parsedSplits = editForm.splits
+        .map(s => ({
+          amountCents: sign * Math.round(Math.abs(parseFloat(s.amount || '0')) * 100),
+          categoryId: s.categoryId || null,
+          notes: s.notes.trim() || null,
+        }))
+        .filter(s => s.amountCents !== 0 || s.categoryId);
       const totalCents = parsedSplits.reduce((sum, s) => sum + s.amountCents, 0);
+      if (parsedSplits.length === 0) return;
       const body: Record<string, unknown> = {
         date: editForm.date,
         amountCents: totalCents,
         accountId: editForm.accountId,
+        notes: editForm.notes.trim() || null,
       };
       if (editForm.payeeName.trim()) body.payeeName = editForm.payeeName.trim();
-      if (parsedSplits.length > 1) {
+      if (parsedSplits.length > 1 || wasSplit || parsedSplits.some(s => s.notes)) {
         body.splits = parsedSplits;
       } else {
         body.categoryId = parsedSplits[0]?.categoryId ?? null;
@@ -338,6 +491,13 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
     if (window.confirm('Delete this transaction?')) deleteMutation.mutate(id);
   }
 
+  const visibleSchedules = (schedules ?? []).filter((schedule) =>
+    schedule.isActive && (!accountId || schedule.accountId === accountId)
+  );
+  const hasLedgerRows = (txns?.length ?? 0) > 0 || visibleSchedules.length > 0;
+
+  const selectedAccount = accounts?.find(a => a.id === accountId);
+
   return (
     <>
       {showAdd && (
@@ -347,11 +507,18 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
         />
       )}
 
+      {showReconcile && selectedAccount && (
+        <ReconcileModal
+          account={selectedAccount}
+          onClose={() => setShowReconcile(false)}
+        />
+      )}
+
       <div style={S.toolbar}>
         <select
           style={S.select}
           value={accountId}
-          onChange={(e) => setAccountId(e.target.value)}
+          onChange={(e) => { setAccountId(e.target.value); setShowReconcile(false); }}
         >
           <option value="">All accounts</option>
           {accounts?.map((a) => (
@@ -359,27 +526,36 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
           ))}
         </select>
 
-        <button style={S.addBtn} onClick={() => setShowAdd(true)}>
-          + New Transaction
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {selectedAccount && (
+            <button style={S.reconcileBtn} onClick={() => setShowReconcile(true)}>
+              Reconcile
+            </button>
+          )}
+          <button style={S.addBtn} onClick={() => setShowAdd(true)}>
+            + New Transaction
+          </button>
+        </div>
       </div>
 
       {isLoading && <p style={{ color: '#78716C' }}>Loading…</p>}
       {error && <p style={{ color: '#7A1F2B' }}>Error: {(error as Error).message}</p>}
 
-      {txns && txns.length === 0 && (
+      {txns && !hasLedgerRows && (
         <div style={S.empty}>No transactions yet.</div>
       )}
 
-      {txns && txns.length > 0 && (
+      {txns && hasLedgerRows && (
         <table style={S.table}>
           <thead>
             <tr>
               <th style={S.th}>Date</th>
               <th style={S.th}>Account</th>
               <th style={S.th}>Payee</th>
+              <th style={S.th}>Notes</th>
               <th style={S.th}>Category</th>
               <th style={{ ...S.th, ...S.thRight }}>Amount</th>
+              <th style={{ ...S.th, ...S.thRight }}>Balance</th>
               <th style={{ ...S.th, textAlign: 'center' }}>✓</th>
               <th style={{ ...S.th, width: 64 }}></th>
             </tr>
@@ -394,10 +570,41 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                 groupMap.get(t.id)!.push(t);
               }
 
+              const runningBalanceByAccount = new Map(
+                (accounts ?? []).map((account) => [account.id, account.balanceCents]),
+              );
+              const futureTotalsByAccount = new Map<string, number>();
+              for (const schedule of visibleSchedules) {
+                futureTotalsByAccount.set(
+                  schedule.accountId,
+                  (futureTotalsByAccount.get(schedule.accountId) ?? 0) + schedule.amountCents,
+                );
+              }
+              for (const [futureAccountId, futureTotal] of futureTotalsByAccount) {
+                const currentBalance = runningBalanceByAccount.get(futureAccountId);
+                if (currentBalance !== undefined) {
+                  runningBalanceByAccount.set(futureAccountId, currentBalance + futureTotal);
+                }
+              }
               const monoInput = { ...S.cellInput, textAlign: 'right' as const, fontFamily: "'JetBrains Mono', monospace" };
-              const catSelect = (value: string, onChange: (v: string) => void) => (
-                <select style={S.cellSelect} value={value} onChange={(e) => onChange(e.target.value)}>
+              const catSelect = (
+                value: string,
+                onChange: (v: string) => void,
+                onSplit?: () => void,
+              ) => (
+                <select
+                  style={S.cellSelect}
+                  value={value}
+                  onChange={(e) => {
+                    if (e.target.value === SPLIT_OPTION) {
+                      onSplit?.();
+                      return;
+                    }
+                    onChange(e.target.value);
+                  }}
+                >
                   <option value="">— none —</option>
+                  {onSplit && <option value={SPLIT_OPTION}>Split transaction</option>}
                   {groups?.map((g) =>
                     g.categories.length > 0 ? (
                       <optgroup key={g.id} label={g.name}>
@@ -410,20 +617,138 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                 </select>
               );
 
-              return [...groupMap.values()].flatMap((rows) => {
+              const ledgerItems = [
+                ...visibleSchedules.map((schedule) => ({
+                  type: 'schedule' as const,
+                  id: schedule.id,
+                  date: schedule.nextOccurrence,
+                  schedule,
+                })),
+                ...[...groupMap.values()].map((rows) => ({
+                  type: 'transaction' as const,
+                  id: rows[0].id,
+                  date: rows[0].date,
+                  rows,
+                })),
+              ].sort((a, b) => {
+                if (a.type !== b.type) return a.type === 'schedule' ? -1 : 1;
+                const dateCompare = b.date.localeCompare(a.date);
+                if (dateCompare !== 0) return dateCompare;
+                return a.id.localeCompare(b.id);
+              });
+
+              return ledgerItems.flatMap((item) => {
+                if (item.type === 'schedule') {
+                  const schedule = item.schedule;
+                  const balanceAfterCents = runningBalanceByAccount.get(schedule.accountId);
+                  if (balanceAfterCents !== undefined) {
+                    runningBalanceByAccount.set(schedule.accountId, balanceAfterCents - schedule.amountCents);
+                  }
+                  const currentDate = todayIso();
+                  const scheduleStatus =
+                    schedule.nextOccurrence < currentDate
+                      ? 'Past due'
+                      : schedule.nextOccurrence === currentDate
+                        ? 'Due today'
+                        : 'Upcoming';
+                  const scheduleBadgeStyle = {
+                    ...S.upcomingBadge,
+                    ...(scheduleStatus === 'Past due' ? S.pastDueBadge : {}),
+                    ...(scheduleStatus === 'Due today' ? S.dueTodayBadge : {}),
+                  };
+
+                  return [(
+                    <tr key={`schedule|${schedule.id}`} style={S.scheduleRow}>
+                      <td style={{ ...S.td, fontStyle: 'italic', color: '#78716C' }}>{fmtDate(schedule.nextOccurrence)}</td>
+                      <td style={{ ...S.td, color: '#78716C', fontSize: 12.5 }}>{schedule.accountName ?? '—'}</td>
+                      <td style={{ ...S.td, color: '#78716C', fontStyle: 'italic' }}>
+                        {schedule.name}
+                      </td>
+                      <td style={{ ...S.td, color: schedule.notes ? '#78716C' : '#A8A29E', fontSize: 12.5, fontStyle: 'italic' }}>
+                        {schedule.notes ?? schedule.categoryName ?? (schedule.transferAccountName ? `Transfer: ${schedule.transferAccountName}` : '—')}
+                      </td>
+                      <td style={S.td}>
+                        <span style={scheduleBadgeStyle}>{scheduleStatus}</span>
+                      </td>
+                      <td style={{
+                        ...S.td,
+                        ...S.tdMono,
+                        color: '#78716C',
+                        fontStyle: 'italic',
+                      }}>
+                        {fmt$(schedule.amountCents)}
+                      </td>
+                      <td style={{ ...S.td, ...S.tdMono, color: '#78716C', fontStyle: 'italic' }}>
+                        {!accountId || balanceAfterCents === undefined ? '—' : fmt$(balanceAfterCents)}
+                      </td>
+                      <td style={{ ...S.td, textAlign: 'center', color: '#A8A29E' }}>—</td>
+                      <td style={{ ...S.td, whiteSpace: 'nowrap', padding: '11px 8px' }}>
+                        <button
+                          style={S.scheduleAction}
+                          onClick={() => postScheduleMutation.mutate(schedule.id)}
+                          disabled={postScheduleMutation.isPending || skipScheduleMutation.isPending}
+                          aria-label={`Post ${schedule.name}`}
+                          title="Post scheduled transaction"
+                        >
+                          <Send size={13} />
+                        </button>
+                        <button
+                          style={S.scheduleAction}
+                          onClick={() => skipScheduleMutation.mutate(schedule.id)}
+                          disabled={postScheduleMutation.isPending || skipScheduleMutation.isPending}
+                          aria-label={`Skip ${schedule.name}`}
+                          title="Skip this occurrence"
+                        >
+                          <SkipForward size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  )];
+                }
+
+                const rows = item.rows;
                 const first = rows[0];
                 const isEditing = editingId === first.id;
                 const isTransfer = !!first.transferAccountName;
                 const isMultiSplit = rows.length > 1;
+                const balanceAfterCents = runningBalanceByAccount.get(first.accountId);
+                if (balanceAfterCents !== undefined) {
+                  runningBalanceByAccount.set(first.accountId, balanceAfterCents - first.amountCents);
+                }
 
                 // ── Edit mode ──────────────────────────────────────────────────
                 if (isEditing && editForm) {
                   const elems: React.ReactElement[] = [];
+                  const editIsSplit = !isTransfer && editForm.splits.length > 1;
+                  const editAmountType = editForm.amountType ?? 'expense';
+                  const editSign = editAmountType === 'income' ? 1 : -1;
+                  const editTotalCents = editSign * editForm.splits.reduce(
+                    (sum, split) => sum + Math.round(Math.abs(parseFloat(split.amount || '0')) * 100),
+                    0,
+                  );
+                  const signToggle = (
+                    <button
+                      type="button"
+                      style={{
+                        ...S.signBtn,
+                        ...(editAmountType === 'income' ? S.signBtnIncome : {}),
+                      }}
+                      onClick={() => setEditForm({
+                        ...editForm,
+                        amountType: editAmountType === 'income' ? 'expense' : 'income',
+                      })}
+                      aria-label={editAmountType === 'income' ? 'Mark as payment' : 'Mark as deposit'}
+                      aria-pressed={editAmountType === 'income'}
+                      title={editAmountType === 'income' ? 'Deposit/refund' : 'Payment'}
+                    >
+                      {editAmountType === 'income' ? '+' : '-'}
+                    </button>
+                  );
 
                   // Primary edit row
                   const split0 = editForm.splits[0];
                   elems.push(
-                    <tr key={`${first.id}|edit|0`} style={S.editRow}>
+                    <tr key={`${first.id}|edit|summary`} style={S.editRow}>
                       <td style={S.td}>
                         <input
                           style={S.cellInput}
@@ -461,13 +786,40 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         )}
                       </td>
                       <td style={S.td}>
+                        <input
+                          style={S.cellInput}
+                          type="text"
+                          value={editForm.notes}
+                          onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                          placeholder="Notes"
+                        />
+                      </td>
+                      <td style={S.td}>
                         {isTransfer ? (
                           <span style={S.tdMuted}>—</span>
+                        ) : editIsSplit ? (
+                          <span style={{
+                            display: 'inline-block',
+                            fontSize: 10.5,
+                            fontWeight: 600,
+                            letterSpacing: '0.08em',
+                            textTransform: 'uppercase',
+                            color: '#78716C',
+                            background: '#EDE8DF',
+                            padding: '2px 6px',
+                          }}>Split</span>
                         ) : (
-                          catSelect(split0?.categoryId ?? '', (v) => {
-                            const next = editForm.splits.map((s, i) => i === 0 ? { ...s, categoryId: v } : s);
-                            setEditForm({ ...editForm, splits: next });
-                          })
+                          <div>
+                            {catSelect(split0?.categoryId ?? '', (v) => {
+                              const next = editForm.splits.map((s, i) => i === 0 ? { ...s, categoryId: v } : s);
+                              setEditForm({ ...editForm, splits: next });
+                            }, () => {
+                              setEditForm({
+                                ...editForm,
+                                splits: [...editForm.splits, { categoryId: '', amount: '', notes: '' }],
+                              });
+                            })}
+                          </div>
                         )}
                       </td>
                       <td style={{ ...S.td, ...S.tdMono }}>
@@ -480,30 +832,43 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                             onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })}
                             onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(first); }}
                           />
+                        ) : editIsSplit ? (
+                          <div style={S.signedAmount}>
+                            {signToggle}
+                            <span style={editTotalCents >= 0 ? S.amtPositive : S.amtNegative}>
+                              {fmt$(editTotalCents)}
+                            </span>
+                          </div>
                         ) : (
-                          <input
-                            style={monoInput}
-                            type="number"
-                            step="0.01"
-                            value={split0?.amount ?? ''}
-                            onChange={(e) => {
-                              const next = editForm.splits.map((s, i) => i === 0 ? { ...s, amount: e.target.value } : s);
-                              setEditForm({ ...editForm, splits: next });
-                            }}
-                            onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(first); }}
-                          />
+                          <div style={S.signedAmount}>
+                            {signToggle}
+                            <input
+                              style={monoInput}
+                              type="number"
+                              step="0.01"
+                              value={split0?.amount ?? ''}
+                              onChange={(e) => {
+                                const next = editForm.splits.map((s, i) => i === 0 ? { ...s, amount: e.target.value } : s);
+                                setEditForm({ ...editForm, splits: next });
+                              }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(first); }}
+                            />
+                          </div>
                         )}
                       </td>
+                      <td style={{ ...S.td, ...S.tdMono, color: '#A8A29E' }}>—</td>
                       <td style={{ ...S.td, textAlign: 'center' }}>
                         <input
                           type="checkbox"
                           style={S.clearedCheck}
                           checked={first.cleared}
+                          disabled={first.reconciled}
+                          title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
                           onChange={() => toggleCleared.mutate({ id: first.id, cleared: !first.cleared })}
                         />
                       </td>
                       <td style={{ ...S.td, whiteSpace: 'nowrap' }}>
-                        <button style={S.saveBtn} onClick={() => saveEdit(first)} disabled={editMutation.isPending}>
+                        <button style={S.saveBtn} onClick={() => saveEdit(first)} disabled={editMutation.isPending || first.reconciled}>
                           Save
                         </button>{' '}
                         <button style={S.cancelBtn} onClick={() => { setEditingId(null); setEditForm(null); }}>
@@ -513,18 +878,50 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                     </tr>
                   );
 
-                  // Additional split edit rows (index 1+)
-                  for (let i = 1; i < rows.length; i++) {
+                  // Split edit rows mirror saved split rows.
+                  for (let i = editIsSplit ? 0 : 1; i < editForm.splits.length; i++) {
                     const idx = i;
                     const splitEntry = editForm.splits[idx];
                     elems.push(
                       <tr key={`${first.id}|edit|${idx}`} style={S.editRow}>
-                        <td style={S.td} /><td style={S.td} /><td style={S.td} />
+                        <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
+                        <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
+                        <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
                         <td style={S.td}>
-                          {catSelect(splitEntry?.categoryId ?? '', (v) => {
-                            const next = editForm.splits.map((s, j) => j === idx ? { ...s, categoryId: v } : s);
-                            setEditForm({ ...editForm, splits: next });
-                          })}
+                          <input
+                            style={S.cellInput}
+                            type="text"
+                            value={splitEntry?.notes ?? ''}
+                            onChange={(e) => {
+                              const next = editForm.splits.map((s, j) => j === idx ? { ...s, notes: e.target.value } : s);
+                              setEditForm({ ...editForm, splits: next });
+                            }}
+                            placeholder="Split note"
+                          />
+                        </td>
+                        <td style={S.td}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 24px', gap: 6, alignItems: 'center' }}>
+                            {catSelect(splitEntry?.categoryId ?? '', (v) => {
+                              const next = editForm.splits.map((s, j) => j === idx ? { ...s, categoryId: v } : s);
+                              setEditForm({ ...editForm, splits: next });
+                            }, () => {
+                              setEditForm({
+                                ...editForm,
+                                splits: [...editForm.splits, { categoryId: '', amount: '', notes: '' }],
+                              });
+                            })}
+                            <button
+                              type="button"
+                              style={S.iconBtnDanger}
+                              onClick={() => setEditForm({
+                                ...editForm,
+                                splits: editForm.splits.filter((_, j) => j !== idx),
+                              })}
+                              aria-label="Remove split"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
                         </td>
                         <td style={{ ...S.td, ...S.tdMono }}>
                           <input
@@ -538,7 +935,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                             }}
                           />
                         </td>
-                        <td style={S.td} /><td style={S.td} />
+                        <td style={S.td} /><td style={S.td} /><td style={S.td} />
                       </tr>
                     );
                   }
@@ -557,7 +954,12 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                     <tr key={first.id}>
                       <td style={S.td}>{fmtDate(first.date)}</td>
                       <td style={{ ...S.td, color: '#78716C', fontSize: 12.5 }}>{first.accountName ?? '—'}</td>
-                      <td style={S.td}>{first.payeeName ?? <span style={S.tdMuted}>—</span>}</td>
+                      <td style={S.td}>
+                        {first.payeeName ?? <span style={S.tdMuted}>—</span>}
+                      </td>
+                      <td style={{ ...S.td, color: first.notes ? '#78716C' : '#A8A29E', fontSize: 12.5 }}>
+                        {first.notes ?? '—'}
+                      </td>
                       <td style={S.td}>
                         <button
                           onClick={() => toggleSplit(first.id)}
@@ -595,19 +997,36 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                       }}>
                         {fmt$(first.amountCents)}
                       </td>
+                      <td style={{ ...S.td, ...S.tdMono, color: '#78716C' }}>
+                        {!accountId || balanceAfterCents === undefined ? '—' : fmt$(balanceAfterCents)}
+                      </td>
                       <td style={{ ...S.td, textAlign: 'center' }}>
                         <input
                           type="checkbox"
                           style={S.clearedCheck}
                           checked={first.cleared}
+                          disabled={first.reconciled}
+                          title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
                           onChange={() => toggleCleared.mutate({ id: first.id, cleared: !first.cleared })}
                         />
                       </td>
                       <td style={{ ...S.td, whiteSpace: 'nowrap', padding: '11px 8px' }}>
-                        <button style={S.iconBtn} onClick={() => startEdit(first)} aria-label="Edit">
+                        <button
+                          style={S.iconBtn}
+                          onClick={() => startEdit(first)}
+                          aria-label="Edit"
+                          disabled={first.reconciled}
+                          title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
+                        >
                           <Pencil size={13} />
                         </button>
-                        <button style={S.iconBtnDanger} onClick={() => handleDelete(first.id)} aria-label="Delete">
+                        <button
+                          style={S.iconBtnDanger}
+                          onClick={() => handleDelete(first.id)}
+                          aria-label="Delete"
+                          disabled={first.reconciled}
+                          title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
+                        >
                           <Trash2 size={13} />
                         </button>
                       </td>
@@ -618,16 +1037,21 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                   if (!collapsed) for (const row of rows) {
                     elems.push(
                       <tr key={`${row.id}|${row.categoryId ?? ''}`} style={{ background: '#FEFAF4' }}>
-                        <td style={S.td} /><td style={S.td} /><td style={S.td} />
-                        <td style={{ ...S.td, paddingLeft: 24 }}>
+                        <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
+                        <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
+                        <td style={{ ...S.td, color: '#C5BDB5' }}>—</td>
+                        <td style={{ ...S.td, color: row.splitNotes ? '#A8A29E' : '#C5BDB5', fontSize: 11.5 }}>
+                          {row.splitNotes ?? '—'}
+                        </td>
+                        <td style={S.td}>
                           <span style={{ color: '#78716C', fontSize: 12.5 }}>
-                            ↳ {row.categoryName ?? <em style={{ color: '#A8A29E' }}>Uncategorized</em>}
+                            {row.categoryName ?? <em style={{ color: '#A8A29E' }}>Uncategorized</em>}
                           </span>
                         </td>
                         <td style={{ ...S.td, ...S.tdMono, color: '#78716C', fontSize: 12.5 }}>
                           {fmt$(row.splitAmountCents ?? 0)}
                         </td>
-                        <td style={S.td} /><td style={S.td} />
+                        <td style={S.td} /><td style={S.td} /><td style={S.td} />
                       </tr>
                     );
                   }
@@ -646,6 +1070,9 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                         ? <span style={{ color: '#78716C' }}>Transfer: {first.transferAccountName}</span>
                         : first.payeeName ?? <span style={S.tdMuted}>—</span>}
                     </td>
+                    <td style={{ ...S.td, color: first.notes ? '#78716C' : '#A8A29E', fontSize: 12.5 }}>
+                      {first.notes ?? '—'}
+                    </td>
                     <td style={S.td}>
                       {isTransfer
                         ? <span style={S.tdMuted}>—</span>
@@ -657,19 +1084,36 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                     }}>
                       {fmt$(displayCents)}
                     </td>
+                    <td style={{ ...S.td, ...S.tdMono, color: '#78716C' }}>
+                      {!accountId || balanceAfterCents === undefined ? '—' : fmt$(balanceAfterCents)}
+                    </td>
                     <td style={{ ...S.td, textAlign: 'center' }}>
                       <input
                         type="checkbox"
                         style={S.clearedCheck}
                         checked={first.cleared}
+                        disabled={first.reconciled}
+                        title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
                         onChange={() => toggleCleared.mutate({ id: first.id, cleared: !first.cleared })}
                       />
                     </td>
                     <td style={{ ...S.td, whiteSpace: 'nowrap', padding: '11px 8px' }}>
-                      <button style={S.iconBtn} onClick={() => startEdit(first)} aria-label="Edit">
+                      <button
+                        style={S.iconBtn}
+                        onClick={() => startEdit(first)}
+                        aria-label="Edit"
+                        disabled={first.reconciled}
+                        title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
+                      >
                         <Pencil size={13} />
                       </button>
-                      <button style={S.iconBtnDanger} onClick={() => handleDelete(first.id)} aria-label="Delete">
+                      <button
+                        style={S.iconBtnDanger}
+                        onClick={() => handleDelete(first.id)}
+                        aria-label="Delete"
+                        disabled={first.reconciled}
+                        title={first.reconciled ? 'Reconciled transactions are locked' : undefined}
+                      >
                         <Trash2 size={13} />
                       </button>
                     </td>

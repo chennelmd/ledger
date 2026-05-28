@@ -1,10 +1,13 @@
 import { Hono } from 'hono';
 import { and, eq, isNull, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../../db/client.js';
 import { BudgetAssignmentSchema } from '../../shared/schemas.js';
 
 export const budgetRouter = new Hono();
+const linkedDebtCategories = alias(schema.categories, 'linked_debt_categories');
+const activityCategoryId = sql<string | null>`coalesce(${schema.transactionSplits.categoryId}, ${linkedDebtCategories.id})`;
 
 // ─── GET /:month ──────────────────────────────────────────────────────────────
 // Returns groups → categories, each enriched with assignedCents, activityCents,
@@ -54,32 +57,34 @@ budgetRouter.get('/:month', async (c) => {
 
     // 5. This month's spending — drives the Activity column
     db.select({
-      categoryId: schema.transactionSplits.categoryId,
+      categoryId: activityCategoryId,
       activity: sql<number>`coalesce(sum(${schema.transactionSplits.amountCents}), 0)`,
     })
       .from(schema.transactionSplits)
       .innerJoin(schema.transactions, eq(schema.transactionSplits.transactionId, schema.transactions.id))
+      .leftJoin(linkedDebtCategories, eq(linkedDebtCategories.linkedDebtAccountId, schema.transactionSplits.transferAccountId))
       .where(and(
         isNull(schema.transactions.deletedAt),
         sql`strftime('%Y-%m', ${schema.transactions.date}) = ${month}`,
       ))
-      .groupBy(schema.transactionSplits.categoryId),
+      .groupBy(activityCategoryId),
 
     // 6. Activity per month per category through current month — used for carryover calc
     db.select({
       month: sql<string>`strftime('%Y-%m', ${schema.transactions.date})`,
-      categoryId: schema.transactionSplits.categoryId,
+      categoryId: activityCategoryId,
       activity: sql<number>`coalesce(sum(${schema.transactionSplits.amountCents}), 0)`,
     })
       .from(schema.transactionSplits)
       .innerJoin(schema.transactions, eq(schema.transactionSplits.transactionId, schema.transactions.id))
+      .leftJoin(linkedDebtCategories, eq(linkedDebtCategories.linkedDebtAccountId, schema.transactionSplits.transferAccountId))
       .where(and(
         isNull(schema.transactions.deletedAt),
         sql`strftime('%Y-%m', ${schema.transactions.date}) <= ${month}`,
       ))
       .groupBy(
         sql`strftime('%Y-%m', ${schema.transactions.date})`,
-        schema.transactionSplits.categoryId,
+        activityCategoryId,
       ),
 
     // 7. On-budget accounts (for RTA)

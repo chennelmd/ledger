@@ -192,6 +192,7 @@ export const schedules = sqliteTable('schedules', {
   accountId: text('account_id').notNull().references(() => accounts.id),
   payeeId: text('payee_id').references(() => payees.id),
   categoryId: text('category_id').references(() => categories.id),
+  transferAccountId: text('transfer_account_id').references(() => accounts.id),
   amountCents: integer('amount_cents').notNull(),
   rrule: text('rrule').notNull(),
   nextOccurrence: text('next_occurrence').notNull(),

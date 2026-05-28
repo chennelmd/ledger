@@ -189,6 +189,7 @@ const S = {
 interface Account {
   id: string; name: string; type: string; subtype: string;
   isOnBudget: boolean; startingBalanceCents: number;
+  debtCategoryId?: string | null;
   isRevolving?: boolean | null; creditLimitCents?: number | null;
   rateType?: string | null;
   apr?: number | null; standardApr?: number | null;
@@ -238,7 +239,7 @@ export function AddAccountModal({ onClose, account }: Props) {
   const [dueDay, setDueDay] = useState(
     account?.dueDay ? String(account.dueDay) : ''
   );
-  const [debtCategoryId, setDebtCategoryId] = useState('');
+  const [debtCategoryId, setDebtCategoryId] = useState(account?.debtCategoryId ?? '');
 
   const { data: categoryGroups } = useQuery({
     queryKey: ['categories'],
@@ -282,6 +283,14 @@ export function AddAccountModal({ onClose, account }: Props) {
       subtype,
       isOnBudget,
       startingBalanceCents,
+      // When editing, only send null (clear intent) if the user explicitly removed a
+      // previously-linked category. Sending null unconditionally wipes the link even
+      // when the user didn't touch the Debt Category field.
+      linkedDebtCategoryId: isEditing
+        ? (type === 'liability' && isOnBudget
+            ? (debtCategoryId || (account?.debtCategoryId ? null : undefined))
+            : undefined)
+        : (type === 'liability' && isOnBudget ? debtCategoryId || null : null),
     };
 
     if (type === 'liability') {
@@ -394,13 +403,13 @@ export function AddAccountModal({ onClose, account }: Props) {
                 <>
                   <div style={S.sectionHeading}>Debt Details</div>
 
-                  {/* Debt category — only shown when creating with a non-zero balance */}
-                  {!isEditing && isOnBudget && parseFloat(balance || '0') > 0 && (
+                  {/* Debt category — used for on-budget liability planning */}
+                  {isOnBudget && (
                     <div style={S.row}>
                       <label style={S.label} htmlFor="acc-debtcat">
                         Debt Category
                         <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, marginLeft: 6 }}>
-                          (records starting debt in an envelope)
+                          (for debt planning)
                         </span>
                       </label>
                       <select
@@ -409,7 +418,9 @@ export function AddAccountModal({ onClose, account }: Props) {
                         value={debtCategoryId}
                         onChange={(e) => setDebtCategoryId(e.target.value)}
                       >
-                        <option value="">— uncategorized —</option>
+                        <option value="">
+                          {isEditing ? 'None' : `Auto-create: Bank Card Debt – ${name.trim() || 'Account Name'}`}
+                        </option>
                         {categoryGroups?.filter((g) => !g.isIncome).map((g) => (
                           <optgroup key={g.id} label={g.name}>
                             {g.categories.map((cat) => (

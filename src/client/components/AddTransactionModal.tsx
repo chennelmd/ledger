@@ -7,7 +7,8 @@ import type { Account } from '../../db/schema.js';
 
 interface Category { id: string; name: string; }
 interface CategoryGroup { id: string; name: string; categories: Category[]; }
-interface SplitRow { amount: string; categoryId: string; }
+interface TagOption { id: string; name: string; }
+interface SplitRow { amount: string; categoryId: string; tags: string[]; }
 
 // ─── api ─────────────────────────────────────────────────────────────────────
 
@@ -22,6 +23,12 @@ async function fetchAccounts(): Promise<Account[]> {
 async function fetchCategories(): Promise<CategoryGroup[]> {
   const res = await fetch('/api/categories');
   if (!res.ok) throw new Error('failed to fetch categories');
+  return res.json();
+}
+
+async function fetchTags(): Promise<TagOption[]> {
+  const res = await fetch('/api/tags');
+  if (!res.ok) throw new Error('failed to fetch tags');
   return res.json();
 }
 
@@ -181,8 +188,85 @@ const S = {
     fontFamily: 'inherit',
   },
   mono: { fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: 'tabular-nums' },
+  signedAmount: {
+    display: 'grid',
+    gridTemplateColumns: '30px minmax(0, 1fr)',
+    gap: 6,
+    alignItems: 'center',
+  },
+  signBtn: {
+    border: '1px solid #E7DFD0',
+    background: '#F5EFE6',
+    color: '#78716C',
+    height: 35,
+    width: 30,
+    padding: 0,
+    cursor: 'pointer',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 14,
+    lineHeight: 1,
+  },
+  signBtnIncome: {
+    color: '#2D5016',
+    background: '#F3F7ED',
+    borderColor: '#C8D8B8',
+  },
   errorMsg: { marginTop: 10, fontSize: 12.5, color: '#7A1F2B' },
 };
+
+// ─── TagInput ────────────────────────────────────────────────────────────────
+
+function TagInput({ tags, onChange }: { tags: string[]; onChange: (t: string[]) => void }) {
+  const [inputVal, setInputVal] = useState('');
+
+  function commit(val: string) {
+    const trimmed = val.trim();
+    if (trimmed && !tags.includes(trimmed)) onChange([...tags, trimmed]);
+  }
+
+  return (
+    <div style={{
+      display: 'flex', flexWrap: 'wrap', gap: 4,
+      border: '1px solid #E7DFD0', background: '#FFFEF9',
+      padding: '4px 8px', alignItems: 'center', minHeight: 32,
+    }}>
+      {tags.map(tag => (
+        <span key={tag} style={{
+          background: '#F0EADD', padding: '2px 6px', fontSize: 11,
+          letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: 3,
+        }}>
+          {tag}
+          <button
+            type="button"
+            onClick={() => onChange(tags.filter(t => t !== tag))}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#78716C', fontSize: 13, lineHeight: 1 }}
+            aria-label={`Remove tag ${tag}`}
+          >×</button>
+        </span>
+      ))}
+      <input
+        list="txn-tag-autocomplete"
+        value={inputVal}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v.endsWith(',')) { commit(v.slice(0, -1)); setInputVal(''); }
+          else setInputVal(v);
+        }}
+        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+          if (e.key === 'Enter') { e.preventDefault(); commit(inputVal); setInputVal(''); }
+          else if (e.key === 'Backspace' && !inputVal && tags.length > 0) onChange(tags.slice(0, -1));
+        }}
+        onBlur={() => { if (inputVal.trim()) { commit(inputVal); setInputVal(''); } }}
+        placeholder={tags.length === 0 ? 'Add tags…' : ''}
+        style={{
+          border: 'none', outline: 'none', background: 'none',
+          fontSize: 12.5, color: '#1C1917', minWidth: 70, flex: 1,
+          fontFamily: 'inherit', padding: 0,
+        }}
+      />
+    </div>
+  );
+}
 
 // ─── component ───────────────────────────────────────────────────────────────
 
@@ -199,13 +283,14 @@ export function AddTransactionModal({ onClose, defaultAccountId }: Props) {
   const [mode, setMode]           = useState<'expense' | 'income' | 'transfer'>('expense');
   const [amount, setAmount]       = useState('');
   const [payeeName, setPayeeName] = useState('');
-  const [splits, setSplits]       = useState<SplitRow[]>([{ amount: '', categoryId: '' }]);
+  const [splits, setSplits]       = useState<SplitRow[]>([{ amount: '', categoryId: '', tags: [] }]);
   const [toAccountId, setToAccountId] = useState('');
   const [notes, setNotes]         = useState('');
   const [cleared, setCleared]     = useState(false);
 
   const { data: accounts } = useQuery({ queryKey: ['accounts'], queryFn: fetchAccounts });
   const { data: groups }   = useQuery({ queryKey: ['categories'], queryFn: fetchCategories });
+  const { data: allTags }  = useQuery({ queryKey: ['tags'], queryFn: fetchTags });
 
   // Default to first account if none pre-selected
   useEffect(() => {
@@ -238,26 +323,35 @@ export function AddTransactionModal({ onClose, defaultAccountId }: Props) {
     : totalCents;
   const remainingCents = totalCents - allocatedCents;
   const splitsBalanced = !isMultiSplit || remainingCents === 0;
+  const isDeposit = mode === 'income';
+
+  function toggleAmountSign() {
+    setMode(isDeposit ? 'expense' : 'income');
+  }
 
   function addSplit() {
     if (splits.length === 1) {
       // Transition to multi-split: pre-fill first row with total, add empty second row
       setSplits([
-        { amount: amount, categoryId: splits[0].categoryId },
-        { amount: '', categoryId: '' },
+        { amount: amount, categoryId: splits[0].categoryId, tags: splits[0].tags },
+        { amount: '', categoryId: '', tags: [] },
       ]);
     } else {
-      setSplits([...splits, { amount: '', categoryId: '' }]);
+      setSplits([...splits, { amount: '', categoryId: '', tags: [] }]);
     }
   }
 
   function removeSplit(i: number) {
     const next = splits.filter((_, idx) => idx !== i);
-    setSplits(next.length > 0 ? next : [{ amount: '', categoryId: '' }]);
+    setSplits(next.length > 0 ? next : [{ amount: '', categoryId: '', tags: [] }]);
   }
 
-  function updateSplit(i: number, field: keyof SplitRow, value: string) {
+  function updateSplit(i: number, field: 'amount' | 'categoryId', value: string) {
     setSplits(splits.map((s, idx) => idx === i ? { ...s, [field]: value } : s));
+  }
+
+  function updateSplitTags(i: number, tags: string[]) {
+    setSplits(splits.map((s, idx) => idx === i ? { ...s, tags } : s));
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -288,6 +382,7 @@ export function AddTransactionModal({ onClose, defaultAccountId }: Props) {
         splits: splits.map((s) => ({
           amountCents: sign * Math.round(parseFloat(s.amount || '0') * 100),
           categoryId: s.categoryId || null,
+          tags: s.tags.length > 0 ? s.tags : undefined,
         })),
         notes: notes.trim() || undefined,
         cleared,
@@ -299,6 +394,7 @@ export function AddTransactionModal({ onClose, defaultAccountId }: Props) {
         amountCents,
         payeeName: payeeName.trim() || undefined,
         categoryId: splits[0].categoryId || undefined,
+        tags: splits[0].tags.length > 0 ? splits[0].tags : undefined,
         notes: notes.trim() || undefined,
         cleared,
       });
@@ -321,10 +417,10 @@ export function AddTransactionModal({ onClose, defaultAccountId }: Props) {
               <div style={S.row}>
                 <div style={S.toggleGroup}>
                   <button type="button" style={S.toggleBtn(mode === 'expense')} onClick={() => setMode('expense')}>
-                    Expense
+                    Payment
                   </button>
                   <button type="button" style={S.toggleBtn(mode === 'income')} onClick={() => setMode('income')}>
-                    Income
+                    Deposit
                   </button>
                   <button type="button" style={S.toggleBtn(mode === 'transfer')} onClick={() => setMode('transfer')}>
                     Transfer
@@ -394,18 +490,30 @@ export function AddTransactionModal({ onClose, defaultAccountId }: Props) {
                     </div>
                     <div>
                       <label style={S.label} htmlFor="txn-amount">Amount</label>
-                      <input
-                        id="txn-amount"
-                        style={{ ...S.input, ...S.mono }}
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        placeholder="0.00"
-                        required
-                        autoFocus
-                      />
+                      <div style={S.signedAmount}>
+                        <button
+                          type="button"
+                          style={{ ...S.signBtn, ...(isDeposit ? S.signBtnIncome : {}) }}
+                          onClick={toggleAmountSign}
+                          aria-label={isDeposit ? 'Mark as payment' : 'Mark as deposit'}
+                          aria-pressed={isDeposit}
+                          title={isDeposit ? 'Deposit/refund' : 'Payment'}
+                        >
+                          {isDeposit ? '+' : '-'}
+                        </button>
+                        <input
+                          id="txn-amount"
+                          style={{ ...S.input, ...S.mono }}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={amount}
+                          onChange={(e) => setAmount(e.target.value)}
+                          placeholder="0.00"
+                          required
+                          autoFocus
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -444,38 +552,43 @@ export function AddTransactionModal({ onClose, defaultAccountId }: Props) {
                     {isMultiSplit ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {splits.map((s, i) => (
-                          <div key={i} style={{ display: 'grid', gridTemplateColumns: '100px 1fr 24px', gap: 6, alignItems: 'center' }}>
-                            <input
-                              style={{ ...S.input, ...S.mono }}
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={s.amount}
-                              onChange={(e) => updateSplit(i, 'amount', e.target.value)}
-                              placeholder="0.00"
-                            />
-                            <select
-                              style={S.select}
-                              value={s.categoryId}
-                              onChange={(e) => updateSplit(i, 'categoryId', e.target.value)}
-                            >
-                              <option value="">— none —</option>
-                              {groups?.map((g) =>
-                                g.categories.length > 0 ? (
-                                  <optgroup key={g.id} label={g.name}>
-                                    {g.categories.map((cat) => (
-                                      <option key={cat.id} value={cat.id}>{cat.name}</option>
-                                    ))}
-                                  </optgroup>
-                                ) : null
-                              )}
-                            </select>
-                            <button
-                              type="button"
-                              onClick={() => removeSplit(i)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8A29E', padding: 0, fontSize: 16, lineHeight: 1, fontFamily: 'inherit' }}
-                              aria-label="Remove split"
-                            >×</button>
+                          <div key={i}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr 24px', gap: 6, alignItems: 'center' }}>
+                              <input
+                                style={{ ...S.input, ...S.mono }}
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={s.amount}
+                                onChange={(e) => updateSplit(i, 'amount', e.target.value)}
+                                placeholder="0.00"
+                              />
+                              <select
+                                style={S.select}
+                                value={s.categoryId}
+                                onChange={(e) => updateSplit(i, 'categoryId', e.target.value)}
+                              >
+                                <option value="">— none —</option>
+                                {groups?.map((g) =>
+                                  g.categories.length > 0 ? (
+                                    <optgroup key={g.id} label={g.name}>
+                                      {g.categories.map((cat) => (
+                                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                      ))}
+                                    </optgroup>
+                                  ) : null
+                                )}
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => removeSplit(i)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8A29E', padding: 0, fontSize: 16, lineHeight: 1, fontFamily: 'inherit' }}
+                                aria-label="Remove split"
+                              >×</button>
+                            </div>
+                            <div style={{ marginTop: 3 }}>
+                              <TagInput tags={s.tags} onChange={(t) => updateSplitTags(i, t)} />
+                            </div>
                           </div>
                         ))}
                         <div style={{ fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", textAlign: 'right', marginTop: 2, color: remainingCents === 0 ? '#2D5016' : '#7A1F2B' }}>
@@ -506,6 +619,19 @@ export function AddTransactionModal({ onClose, defaultAccountId }: Props) {
                   </div>
                 </>
               )}
+
+              {/* Tags (non-transfer only, single-split view) */}
+              {mode !== 'transfer' && !isMultiSplit && (
+                <div style={S.row}>
+                  <label style={S.label}>Tags</label>
+                  <TagInput tags={splits[0].tags} onChange={(t) => updateSplitTags(0, t)} />
+                </div>
+              )}
+
+              {/* Shared datalist for tag autocomplete */}
+              <datalist id="txn-tag-autocomplete">
+                {allTags?.map(t => <option key={t.id} value={t.name} />)}
+              </datalist>
 
               {/* Notes */}
               <div style={S.row}>
