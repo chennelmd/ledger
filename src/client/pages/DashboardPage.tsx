@@ -309,6 +309,12 @@ export function DashboardPage() {
             </Tooltip>
           )}
 
+          {trendingDown && activeView === 'now' && (
+            <div style={{ color: '#B45309', fontSize: 11, marginTop: 4 }}>
+              {'↓ '}{fmt$(Math.abs(thisMonthNet - data.prevMonthNetCents))} vs. last month
+            </div>
+          )}
+
           <p style={S.subtitle}>{subtitleText[activeView]}</p>
         </div>
 

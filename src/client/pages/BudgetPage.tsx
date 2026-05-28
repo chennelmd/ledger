@@ -808,10 +808,15 @@ export function BudgetPage() {
   const [month, setMonth] = useState(currentMonth());
   const [numMonths, setNumMonths] = useState<1 | 2 | 3>(readStoredNumMonths);
   const [newGroupName, setNewGroupName] = useState('');
+  const [overspentDismissed, setOverspentDismissed] = useState(false);
 
   useEffect(() => {
     window.localStorage.setItem('budget:numMonths', String(numMonths));
   }, [numMonths]);
+
+  useEffect(() => {
+    setOverspentDismissed(false);
+  }, [month]);
 
   const months = Array.from({ length: numMonths }, (_, i) => shiftMonth(month, i));
 
@@ -828,6 +833,11 @@ export function BudgetPage() {
   const queryError = budgetResults.find((r) => r.error)?.error;
   const ready = primaryData?.readyToAssignCents ?? 0;
   const gridCols = gridTemplate(numMonths, categoryColumnWidth(primaryData));
+
+  const overspentCategories = (primaryData?.groups ?? [])
+    .filter((g) => g.isIncome === false)
+    .flatMap((g) => g.categories)
+    .filter((c) => c.availableCents < 0);
 
   function getCatMonth(catId: string, mi: number): BudgetCategory | undefined {
     return allData[mi]?.groups.flatMap((g) => g.categories).find((c) => c.id === catId);
@@ -874,6 +884,45 @@ export function BudgetPage() {
 
       {isLoading && <p style={{ color: '#78716C' }}>Loading…</p>}
       {queryError && <p style={{ color: '#7A1F2B' }}>Error: {(queryError as Error).message}</p>}
+
+      {/* Overspent categories banner */}
+      {!overspentDismissed && overspentCategories.length > 0 && (
+        <div style={{
+          background: '#FFFBEB',
+          border: '1px solid #FDE68A',
+          color: '#92400E',
+          fontSize: 12,
+          padding: '10px 14px',
+          marginBottom: 12,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+          <span>
+            {'⚠ Overspent: '}
+            {overspentCategories.map((c, i) => (
+              <span key={c.id}>
+                {i > 0 && ' · '}
+                {c.name} {'−'}
+                {Math.abs(c.availableCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+              </span>
+            ))}
+          </span>
+          <button
+            onClick={() => setOverspentDismissed(true)}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: '#92400E',
+              fontSize: 16,
+            }}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Groups */}
       {primaryData?.groups.map((group) => {

@@ -40,6 +40,7 @@ type EditScheduleForm = {
   pendingMonthDay: MonthDay;
   notes: string;
   isActive: boolean;
+  autoPost: boolean;
 };
 
 async function fetchSchedules(): Promise<Schedule[]> {
@@ -440,6 +441,7 @@ export function SchedulesPage() {
   const [monthDays, setMonthDays] = useState<MonthDay[]>([String(dayOfMonth(today()))]);
   const [pendingMonthDay, setPendingMonthDay] = useState<MonthDay>(String(dayOfMonth(today())));
   const [notes, setNotes] = useState('');
+  const [autoPost, setAutoPost] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditScheduleForm | null>(null);
 
@@ -463,6 +465,7 @@ export function SchedulesPage() {
       setMonthDays([defaultDay]);
       setPendingMonthDay(defaultDay);
       setNotes('');
+      setAutoPost(false);
       setShowAdd(false);
       qc.invalidateQueries({ queryKey: ['schedules'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
@@ -520,6 +523,7 @@ export function SchedulesPage() {
       pendingMonthDay: String(dayOfMonth(schedule.nextOccurrence)),
       notes: schedule.notes ?? '',
       isActive: schedule.isActive,
+      autoPost: schedule.autoPost,
     });
   }
 
@@ -542,6 +546,7 @@ export function SchedulesPage() {
         nextOccurrence: editForm.nextOccurrence,
         notes: editForm.notes.trim() || null,
         isActive: editForm.isActive,
+        autoPost: editForm.autoPost,
       },
     }, {
       onSuccess: cancelEdit,
@@ -559,6 +564,7 @@ export function SchedulesPage() {
       rrule: rruleFor(startDate, frequency, monthDays),
       nextOccurrence: startDate,
       notes: notes.trim() || null,
+      autoPost,
     });
   }
 
@@ -813,6 +819,14 @@ export function SchedulesPage() {
               />
             </div>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+              <label style={{ ...S.meta, display: 'flex', gap: 6, alignItems: 'center', marginRight: 'auto' }}>
+                <input
+                  type="checkbox"
+                  checked={autoPost}
+                  onChange={(e) => setAutoPost(e.target.checked)}
+                />
+                Auto-post when due
+              </label>
               <button style={S.submit} type="submit" disabled={createMutation.isPending}>
                 Add
               </button>
@@ -1037,6 +1051,14 @@ export function SchedulesPage() {
                         />
                         Active
                       </label>
+                      <label style={{ ...S.meta, display: 'flex', gap: 6, alignItems: 'center', marginRight: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={editForm.autoPost}
+                          onChange={(e) => setEditForm({ ...editForm, autoPost: e.target.checked })}
+                        />
+                        Auto-post when due
+                      </label>
                       <button
                         style={S.submit}
                         type="button"
@@ -1054,6 +1076,7 @@ export function SchedulesPage() {
               );
             }
 
+            const isOverdue = schedule.nextOccurrence < '2026-05-28';
             return (
               <div
                 key={schedule.id}
@@ -1061,10 +1084,16 @@ export function SchedulesPage() {
                   ...S.row,
                   borderBottom: idx === schedules.length - 1 ? 'none' : S.row.borderBottom,
                   opacity: schedule.isActive ? 1 : 0.55,
+                  ...(isOverdue ? { borderLeft: '3px solid #B91C1C' } : {}),
                 }}
               >
                 <div>
-                  <div style={S.name}>{schedule.name}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={S.name}>{schedule.name}</span>
+                    {schedule.autoPost && (
+                      <span style={{ fontSize: 10, color: '#78716C' }}>⚡ auto</span>
+                    )}
+                  </div>
                   <div style={S.meta}>
                     {schedule.accountName}
                     {schedule.transferAccountName
@@ -1077,7 +1106,14 @@ export function SchedulesPage() {
                 <div style={S.mono}>{fmt$(schedule.amountCents)}</div>
                 <div>
                   <div style={S.meta}>Next</div>
-                  <div style={S.name}>{dateLabel(schedule.nextOccurrence)}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={S.name}>{dateLabel(schedule.nextOccurrence)}</span>
+                    {isOverdue && (
+                      <span style={{ fontSize: 10, color: '#B91C1C', background: '#FEF2F2', padding: '1px 6px' }}>
+                        Overdue
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <div style={S.meta}>Due in</div>

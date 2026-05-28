@@ -350,6 +350,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
   const [editForm, setEditForm]           = useState<EditForm | null>(null);
   const [expandedSplits, setExpandedSplits] = useState<Set<string>>(new Set());
   const [mutErr, setMutErr] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   function toggleSplit(id: string) {
     setExpandedSplits(prev => {
@@ -424,6 +425,11 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, []);
+
+  // Clear search when account changes
+  useEffect(() => {
+    setSearch('');
+  }, [accountId]);
 
   function startEdit(t: TxnRow) {
     setEditingId(t.id);
@@ -504,6 +510,27 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
 
   const selectedAccount = accounts?.find(a => a.id === accountId);
 
+  // Compute search match counts for the "Showing N of M" label
+  const txnGroupCount = txns
+    ? new Set(txns.map((t) => t.id)).size
+    : 0;
+  const searchLowerOuter = search.trim().toLowerCase();
+  const filteredTxnGroupCount = searchLowerOuter && txns
+    ? (() => {
+        const seen = new Set<string>();
+        for (const t of txns) {
+          if (seen.has(t.id)) continue;
+          if (
+            (t.payeeName ?? '').toLowerCase().includes(searchLowerOuter) ||
+            (t.notes ?? '').toLowerCase().includes(searchLowerOuter)
+          ) {
+            seen.add(t.id);
+          }
+        }
+        return seen.size;
+      })()
+    : txnGroupCount;
+
   return (
     <>
       {showAdd && (
@@ -531,6 +558,55 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
             <option key={a.id} value={a.id}>{a.name}</option>
           ))}
         </select>
+
+        <div style={{ display: 'flex', flexDirection: 'column' as const }}>
+          <div style={{ position: 'relative' as const }}>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search transactions…"
+              style={{
+                width: 220,
+                border: '1px solid #E7DFD0',
+                background: '#FFFEF9',
+                padding: '6px 10px',
+                paddingRight: search ? 28 : 10,
+                fontSize: 13,
+                fontFamily: 'inherit',
+                outline: 'none',
+                color: '#1C1917',
+                boxSizing: 'border-box' as const,
+              }}
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                aria-label="Clear search"
+                style={{
+                  position: 'absolute' as const,
+                  right: 6,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#A8A29E',
+                  fontSize: 14,
+                  lineHeight: 1,
+                  padding: '0 2px',
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
+          {search && (
+            <div style={{ fontSize: 11, color: '#78716C', marginTop: 4 }}>
+              Showing {filteredTxnGroupCount} of {txnGroupCount} transactions
+            </div>
+          )}
+        </div>
 
         <div style={{ display: 'flex', gap: 8 }}>
           {selectedAccount && (
@@ -629,6 +705,24 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                 </select>
               );
 
+              const allTransactionItems = [...groupMap.values()].map((rows) => ({
+                type: 'transaction' as const,
+                id: rows[0].id,
+                date: rows[0].date,
+                rows,
+              }));
+
+              const searchLower = search.trim().toLowerCase();
+              const filteredTransactionItems = searchLower
+                ? allTransactionItems.filter((item) => {
+                    const first = item.rows[0];
+                    return (
+                      (first.payeeName ?? '').toLowerCase().includes(searchLower) ||
+                      (first.notes ?? '').toLowerCase().includes(searchLower)
+                    );
+                  })
+                : allTransactionItems;
+
               const ledgerItems = [
                 ...visibleSchedules.map((schedule) => ({
                   type: 'schedule' as const,
@@ -636,12 +730,7 @@ export function LedgerPage({ initialAccountId = '' }: { initialAccountId?: strin
                   date: schedule.nextOccurrence,
                   schedule,
                 })),
-                ...[...groupMap.values()].map((rows) => ({
-                  type: 'transaction' as const,
-                  id: rows[0].id,
-                  date: rows[0].date,
-                  rows,
-                })),
+                ...filteredTransactionItems,
               ].sort((a, b) => {
                 if (a.type !== b.type) return a.type === 'schedule' ? -1 : 1;
                 const dateCompare = b.date.localeCompare(a.date);
