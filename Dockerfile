@@ -30,4 +30,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 # 1. Push schema to /data/app.db (creates tables on first run; safe to re-run).
 # 2. Start the production server.
-CMD ["sh", "-c", "npx drizzle-kit push && node dist/server/server/index.js"]
+CMD ["sh", "-c", "npx drizzle-kit push --force && node dist/server/server/index.js"]
