@@ -199,7 +199,7 @@ budgetRouter.get('/:month', async (c) => {
   // raises envelope totals by the same amount, keeping RTA stable.
   const readyToAssignCents = onBudgetBalance - totalExpenseAvailableCents;
 
-  return c.json({ month, readyToAssignCents, groups: enrichedGroups.filter((g) => g.isIncome || g.categories.length > 0) });
+  return c.json({ month, readyToAssignCents, groups: enrichedGroups });
 });
 
 // ─── PUT /:month/:categoryId ──────────────────────────────────────────────────
