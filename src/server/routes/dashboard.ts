@@ -46,10 +46,17 @@ function computeScheduled(
   const scheduledByCategoryId = new Map<string, number>();
   const outflows: ScheduledOutflow[] = [];
 
+  const windowStartDate = toDateOnly(windowStart);
+
   for (const schedule of schedules) {
     if (!schedule.categoryId) continue;
-    const dates = occurrencesBetween(schedule.rrule, windowStart, windowEnd)
+    const futureDates = occurrencesBetween(schedule.rrule, windowStart, windowEnd)
       .filter((d) => d >= schedule.nextOccurrence);
+    // If the schedule is overdue (nextOccurrence before today), prepend it so it
+    // isn't silently dropped — the money still needs to come out.
+    const dates = schedule.nextOccurrence < windowStartDate
+      ? [schedule.nextOccurrence, ...futureDates]
+      : futureDates;
     for (const date of dates) {
       const outflowCents = Math.max(0, -schedule.amountCents);
       if (outflowCents === 0) continue;

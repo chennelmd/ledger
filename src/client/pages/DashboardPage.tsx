@@ -227,7 +227,7 @@ export function DashboardPage() {
         </div>
       )}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginTop: 3 }}>
-        <span>{activeView === 'eom' ? 'Scheduled (month-end)' : 'Scheduled Transactions'}</span>
+        <span>{activeView === 'eom' ? 'Scheduled – Unbudgeted (month-end)' : 'Scheduled – Unbudgeted'}</span>
         <span>−{fmt$(displayUncoveredScheduled)}</span>
       </div>
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.2)', marginTop: 6, paddingTop: 6, display: 'flex', justifyContent: 'space-between', gap: 20 }}>
@@ -342,7 +342,7 @@ export function DashboardPage() {
             )}
             <div style={{ ...S.statRow, borderBottom: 'none' }}>
               <span style={S.statLabel}>
-                {activeView === 'eom' ? 'Scheduled (month-end)' : 'Scheduled Transactions'}
+                {activeView === 'eom' ? 'Scheduled – Unbudgeted (month-end)' : 'Scheduled – Unbudgeted'}
               </span>
               <span style={S.mono}>{fmtSubtract$(displayUncoveredScheduled)}</span>
             </div>

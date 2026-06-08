@@ -144,7 +144,7 @@ export function HelpPage() {
         <div style={S.formulaCard}>
           <div style={S.formulaRow}><span style={S.formulaOperator}> </span><span>Cash Accounts</span></div>
           <div style={S.formulaRow}><span style={S.formulaOperator}>−</span><span>Reserved for Budget</span></div>
-          <div style={S.formulaRow}><span style={S.formulaOperator}>−</span><span>Scheduled Transactions</span></div>
+          <div style={S.formulaRow}><span style={S.formulaOperator}>−</span><span>Scheduled – Unbudgeted</span></div>
           <hr style={S.formulaDivider} />
           <div style={S.formulaResult}><span style={{ minWidth: 12 }}> </span><span>Unassigned Cash</span></div>
         </div>
@@ -156,7 +156,7 @@ export function HelpPage() {
           <div style={S.term}>Reserved for Budget</div>
           <div style={S.termDef}>The total of all positive category balances. Money you've already assigned to envelopes is spoken for, even if not yet spent.</div>
 
-          <div style={S.term}>Scheduled Transactions</div>
+          <div style={S.term}>Scheduled – Unbudgeted</div>
           <div style={S.termDef}>Upcoming bills/income from the Schedules page that fall within the selected window and aren't already covered by a category reserve.</div>
         </div>
 
@@ -239,10 +239,10 @@ export function HelpPage() {
         </div>
       </section>
 
-      {/* ── 04 Scheduled Transactions ─────────────────────────────── */}
+      {/* ── 04 Scheduled – Unbudgeted ─────────────────────────────── */}
       <section style={S.section}>
         <div style={S.sectionNumber}>04</div>
-        <h2 style={S.sectionTitle}>Scheduled Transactions</h2>
+        <h2 style={S.sectionTitle}>Scheduled – Unbudgeted</h2>
 
         <p style={S.body}>
           Schedules represent recurring bills, subscriptions, or income — anything that happens on a predictable pattern. They appear as ghost rows at the top of the Ledger before they post, and they factor into the Unassigned Cash calculation on the Dashboard.
@@ -260,7 +260,7 @@ export function HelpPage() {
         </div>
 
         <div style={S.callout}>
-          Schedules only affect the Dashboard's <strong>Scheduled Transactions</strong> deduction if they fall within the selected window (next 30 days or month-end) <em>and</em> the category doesn't already have enough reserved to cover them.
+          Schedules only affect the Dashboard's <strong>Scheduled – Unbudgeted</strong> deduction if they fall within the selected window (next 30 days or month-end) <em>and</em> the category doesn't already have enough reserved to cover them.
         </div>
       </section>
 
