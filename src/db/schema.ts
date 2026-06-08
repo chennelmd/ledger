@@ -29,6 +29,7 @@ export const accounts = sqliteTable('accounts', {
 
   // Debt metadata
   isRevolving: integer('is_revolving', { mode: 'boolean' }),
+  paysInFull: integer('pays_in_full', { mode: 'boolean' }).default(false),
   rateType: text('rate_type', { enum: ['fixed', 'variable', 'promotional'] }),
   // APR stored as decimal fraction: 0.2499 = 24.99%. Multiply by 100 for display; use as-is in math (balance * apr / 12 for monthly interest).
   apr: real('apr'),

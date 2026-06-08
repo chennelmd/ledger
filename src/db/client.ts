@@ -57,6 +57,12 @@ if (!scheduleColumns.some((column) => column.name === 'transfer_account_id')) {
   sqlite.prepare('ALTER TABLE schedules ADD COLUMN transfer_account_id text REFERENCES accounts(id)').run();
 }
 
+const accountColumns = sqlite.prepare('PRAGMA table_info(accounts)').all() as Array<{ name: string }>;
+if (!accountColumns.some((column) => column.name === 'pays_in_full')) {
+  await backupDatabase('before-schema-change');
+  sqlite.prepare('ALTER TABLE accounts ADD COLUMN pays_in_full integer DEFAULT 0').run();
+}
+
 export const db = drizzle(sqlite, { schema });
 export { schema };
 export { backupDatabase };

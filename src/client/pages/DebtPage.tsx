@@ -8,6 +8,7 @@ interface DebtAccount {
   name: string;
   subtype: string;
   isRevolving: boolean | null;
+  paysInFull: boolean;
   owedCents: number;
   creditLimitCents: number | null;
   apr: number | null;
@@ -602,6 +603,22 @@ function AccountCard({ account, month }: { account: DebtAccount; month: string }
         >
           {subtypeLabel(account.subtype)}
         </span>
+        {account.paysInFull && (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: '#365142',
+              background: '#E6F0EC',
+              border: '1px solid #A7C4B5',
+              padding: '2px 8px',
+            }}
+          >
+            ✓ Paid in Full Monthly
+          </span>
+        )}
       </div>
 
       {/* Balance */}
@@ -716,7 +733,11 @@ function AccountCard({ account, month }: { account: DebtAccount; month: string }
         <div>
           <div style={colLabelStyle}>Payoff Projection</div>
 
-          {localPaymentCents <= 0 ? (
+          {account.paysInFull ? (
+            <div style={{ fontSize: 12, color: '#365142', background: '#E6F0EC', border: '1px solid #A7C4B5', padding: '8px 10px', lineHeight: 1.5 }}>
+              This card is paid in full each month — no interest cost and no payoff timeline needed.
+            </div>
+          ) : localPaymentCents <= 0 ? (
             <div style={infoStyle}>Set a monthly payment to see payoff timeline</div>
           ) : promoPayoff ? (
             // Two-phase projection for active promotional accounts
@@ -821,6 +842,7 @@ function AccountCard({ account, month }: { account: DebtAccount; month: string }
                 {fmt$(payoff.interestCents)}
               </div>
             </>
+          )}
           )}
         </div>
       </div>

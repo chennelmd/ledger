@@ -27,6 +27,7 @@ export const NewAccountSchema = z.object({
   startingBalanceDate: z.string().optional(),
 
   isRevolving: z.boolean().nullable().optional(),
+  paysInFull: z.boolean().nullable().optional(),
   rateType: RateType.nullable().optional(),
   apr: z.number().nullable().optional(),           // decimal fraction — see schema.ts comment
   standardApr: z.number().nullable().optional(),   // decimal fraction — see schema.ts comment

@@ -457,6 +457,7 @@ dashboardRouter.get('/debt', async (c) => {
       name: account.name,
       subtype: account.subtype,
       isRevolving: account.isRevolving,
+      paysInFull: account.paysInFull ?? false,
       owedCents,
       creditLimitCents: account.creditLimitCents,
       apr: account.apr,

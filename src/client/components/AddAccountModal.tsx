@@ -190,7 +190,7 @@ interface Account {
   id: string; name: string; type: string; subtype: string;
   isOnBudget: boolean; startingBalanceCents: number;
   debtCategoryId?: string | null;
-  isRevolving?: boolean | null; creditLimitCents?: number | null;
+  isRevolving?: boolean | null; paysInFull?: boolean | null; creditLimitCents?: number | null;
   rateType?: string | null;
   apr?: number | null; standardApr?: number | null;
   promoEndDate?: string | null;
@@ -219,6 +219,7 @@ export function AddAccountModal({ onClose, account }: Props) {
   const [isRevolving, setIsRevolving] = useState(
     account?.isRevolving == null ? '' : account.isRevolving ? 'true' : 'false'
   );
+  const [paysInFull, setPaysInFull] = useState(account?.paysInFull ?? false);
   const [creditLimit, setCreditLimit] = useState(
     account?.creditLimitCents ? (account.creditLimitCents / 100).toFixed(2) : ''
   );
@@ -296,6 +297,7 @@ export function AddAccountModal({ onClose, account }: Props) {
     if (type === 'liability') {
       if (debtCategoryId) payload.startingBalanceCategoryId = debtCategoryId;
       if (isRevolving !== '') payload.isRevolving = isRevolving === 'true';
+      payload.paysInFull = paysInFull;
       if (creditLimit)   payload.creditLimitCents  = Math.round(parseFloat(creditLimit) * 100);
       payload.rateType = rateType;
       payload.apr = apr ? parseFloat(apr) / 100 : null; // store as decimal: 24.99 → 0.2499
@@ -445,6 +447,18 @@ export function AddAccountModal({ onClose, account }: Props) {
                       <option value="true">Yes (credit card, HELOC)</option>
                       <option value="false">No (installment loan)</option>
                     </select>
+                  </div>
+
+                  {/* Pays in full */}
+                  <div style={{ ...S.row, alignItems: 'center' }}>
+                    <label style={S.label} htmlFor="acc-pays-in-full">Paid in Full Monthly?</label>
+                    <input
+                      id="acc-pays-in-full"
+                      type="checkbox"
+                      checked={paysInFull}
+                      onChange={(e) => setPaysInFull(e.target.checked)}
+                      style={{ width: 16, height: 16, cursor: 'pointer' }}
+                    />
                   </div>
 
                   <div style={S.row}>
