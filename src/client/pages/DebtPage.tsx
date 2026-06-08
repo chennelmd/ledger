@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 // ─── types ────────────────────────────────────────────────────────────────────
@@ -488,6 +488,7 @@ function PaymentInput({
 // ─── AccountCard ──────────────────────────────────────────────────────────────
 
 function AccountCard({ account, month }: { account: DebtAccount; month: string }) {
+  const qc = useQueryClient();
   const [localPaymentCents, setLocalPaymentCents] = useState(account.monthlyPaymentCents);
 
   const payoff = useMemo(
@@ -508,6 +509,15 @@ function AccountCard({ account, month }: { account: DebtAccount; month: string }
 
   const hasActivePromo = account.promoEndDate !== null && account.standardApr !== null &&
     new Date((account.promoEndDate ?? '') + 'T12:00:00') > new Date();
+
+  // Auto-sync budget assignment to current balance for "paid in full" cards
+  useEffect(() => {
+    if (!account.paysInFull || !account.debtCategoryId) return;
+    if (account.owedCents === account.monthlyPaymentCents) return;
+    setLocalPaymentCents(account.owedCents);
+    putBudgetAssignment(month, account.debtCategoryId, account.owedCents)
+      .then(() => qc.invalidateQueries({ queryKey: ['debt'] }));
+  }, [account.paysInFull, account.owedCents, account.debtCategoryId, account.monthlyPaymentCents, month, qc]);
 
   const monoStyle: React.CSSProperties = {
     fontFamily: "'JetBrains Mono', monospace",
@@ -721,12 +731,23 @@ function AccountCard({ account, month }: { account: DebtAccount; month: string }
             Budgeted / month
             <Tip content="How much you've set aside for this debt in the budget. Changing this updates your budget assignment for the current month and recalculates the payoff timeline instantly." />
           </div>
-          <PaymentInput
-            month={month}
-            account={account}
-            localPaymentCents={localPaymentCents}
-            onLocalChange={setLocalPaymentCents}
-          />
+          {account.paysInFull ? (
+            <div>
+              <div style={{ ...monoStyle, fontSize: 14, color: '#1C1917', padding: '7px 9px', border: '1px solid #E7DFD0', background: '#F5EFE6' }}>
+                {fmt$(account.owedCents)}
+              </div>
+              <div style={{ fontSize: 11, color: '#78716C', fontStyle: 'italic', marginTop: 5 }}>
+                Auto-set to current balance
+              </div>
+            </div>
+          ) : (
+            <PaymentInput
+              month={month}
+              account={account}
+              localPaymentCents={localPaymentCents}
+              onLocalChange={setLocalPaymentCents}
+            />
+          )}
         </div>
 
         {/* Column 3 — Payoff Projection */}
