@@ -843,7 +843,6 @@ function AccountCard({ account, month }: { account: DebtAccount; month: string }
               </div>
             </>
           )}
-          )}
         </div>
       </div>
     </div>
