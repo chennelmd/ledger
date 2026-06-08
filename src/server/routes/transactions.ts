@@ -169,16 +169,25 @@ transactionsRouter.post('/transfer', async (c) => {
     return c.json({ error: 'cannot transfer to the same account' }, 400);
   }
 
+  // For liability→liability transfers (e.g. credit card balance transfers), the sign
+  // convention is the opposite: the source card's debt decreases (positive) and the
+  // destination card's debt increases (negative).
+  const fromAccount = db.select({ type: schema.accounts.type }).from(schema.accounts).where(eq(schema.accounts.id, fromAccountId)).get();
+  const toAccount = db.select({ type: schema.accounts.type }).from(schema.accounts).where(eq(schema.accounts.id, toAccountId)).get();
+  const bothLiabilities = fromAccount?.type === 'liability' && toAccount?.type === 'liability';
+  const fromSign = bothLiabilities ? 1 : -1;
+  const toSign = bothLiabilities ? -1 : 1;
+
   const transferId = nanoid();
   const now = new Date().toISOString();
 
   const result = db.transaction((tx) => {
-    // Outgoing leg: negative on source account
+    // Outgoing leg: negative on source account (positive if both are liabilities)
     const fromTxn = tx.insert(schema.transactions).values({
       id: nanoid(),
       accountId: fromAccountId,
       date,
-      amountCents: -amountCents,
+      amountCents: fromSign * amountCents,
       notes: notes ?? null,
       cleared: cleared ?? false,
       transferId,
@@ -189,17 +198,17 @@ transactionsRouter.post('/transfer', async (c) => {
     tx.insert(schema.transactionSplits).values({
       id: nanoid(),
       transactionId: fromTxn.id,
-      amountCents: -amountCents,
+      amountCents: fromSign * amountCents,
       transferAccountId: toAccountId,
       sortOrder: 0,
     }).run();
 
-    // Incoming leg: positive on destination account
+    // Incoming leg: positive on destination account (negative if both are liabilities)
     const toTxn = tx.insert(schema.transactions).values({
       id: nanoid(),
       accountId: toAccountId,
       date,
-      amountCents,
+      amountCents: toSign * amountCents,
       notes: notes ?? null,
       cleared: cleared ?? false,
       transferId,
@@ -210,7 +219,7 @@ transactionsRouter.post('/transfer', async (c) => {
     tx.insert(schema.transactionSplits).values({
       id: nanoid(),
       transactionId: toTxn.id,
-      amountCents,
+      amountCents: toSign * amountCents,
       transferAccountId: fromAccountId,
       sortOrder: 0,
     }).run();
