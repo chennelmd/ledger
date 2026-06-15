@@ -187,15 +187,19 @@ function SummaryCard({ label, value, sub, tooltip }: { label: string; value: str
 
 // ── Report: Income vs Expenses ────────────────────────────────────────────────
 
-function IncomeVsExpenses({ txs }: { txs: Transaction[] }) {
+function IncomeVsExpenses({ txs, accounts }: { txs: Transaction[]; accounts: AccountWithBalance[] }) {
+  // Asset account names — transfers between these are pure moves (checking↔savings), not income/spending
+  const assetNames = new Set(accounts.filter(a => a.type === 'asset').map(a => a.name));
+  const isAssetTransfer = (t: Transaction) => !!(t.transferAccountName && assetNames.has(t.transferAccountName));
+
   // Deduplicate: split transactions produce one row per split, all with the same amountCents
   const unique = Array.from(new Map(txs.map(t => [t.id, t])).values());
   const assetTxs = unique.filter(t => t.accountType === 'asset');
-  // Income: positive deposits into asset accounts, excluding all transfers
-  const income   = assetTxs.filter(t => t.amountCents > 0 && !t.transferId && !t.transferAccountName).reduce((s, t) => s + t.amountCents, 0);
-  // Out: negative amounts from asset accounts, excluding only uncategorized transfers (e.g. checking→savings).
-  // Categorized transfers like credit card payments remain — they are real budgeted spending.
-  const expenses = assetTxs.filter(t => t.amountCents < 0 && !(t.transferId && !t.categoryName)).reduce((s, t) => s + Math.abs(t.amountCents), 0);
+  // Income: positive deposits into asset accounts, excluding asset-to-asset transfers
+  const income   = assetTxs.filter(t => t.amountCents > 0 && !isAssetTransfer(t)).reduce((s, t) => s + t.amountCents, 0);
+  // Out: negative from asset accounts, excluding asset-to-asset transfers.
+  // Debt payments (checking→credit card) are included because the target is a liability, not an asset.
+  const expenses = assetTxs.filter(t => t.amountCents < 0 && !isAssetTransfer(t)).reduce((s, t) => s + Math.abs(t.amountCents), 0);
   const net      = income - expenses;
 
   const barMax = Math.max(income, expenses, 1);
@@ -222,7 +226,7 @@ function IncomeVsExpenses({ txs }: { txs: Transaction[] }) {
         {/* Expenses */}
         <Tooltip content={
           <div style={{ fontSize: 12, lineHeight: 1.7, maxWidth: 220 }}>
-            <div style={{ color: '#A8A29E', marginBottom: 4 }}>Negative transactions on checking & savings, including categorized payments like credit card debt. Excludes uncategorized transfers (e.g. checking → savings).</div>
+            <div style={{ color: '#A8A29E', marginBottom: 4 }}>All spending from checking & savings — direct bills, debt payments, subscriptions. Excludes transfers between your own asset accounts (e.g. checking → savings).</div>
             <div style={{ fontVariantNumeric: 'tabular-nums', color: '#7A1F2B' }}>{fmt$(expenses)} this month</div>
           </div>
         }>
@@ -531,7 +535,7 @@ export function DashboardPage() {
 
         {/* Left: Reports */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-          <IncomeVsExpenses txs={monthTxs} />
+          <IncomeVsExpenses txs={monthTxs} accounts={accounts} />
           <hr style={{ ...divider, margin: 0 }} />
           <UpcomingCashImpact schedules={schedules} freeCashCents={data.freeCashCents} />
           <hr style={{ ...divider, margin: 0 }} />
