@@ -464,9 +464,18 @@ export function DashboardPage() {
 
       {/* Two-column layout */}
       <hr style={divider} />
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.5fr)', gap: 48, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: 48, alignItems: 'start' }}>
 
-        {/* Left: Recent transactions */}
+        {/* Left: Reports */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+          <IncomeVsExpenses txs={monthTxs} />
+          <hr style={{ ...divider, margin: 0 }} />
+          <UpcomingCashImpact schedules={schedules} freeCashCents={data.freeCashCents} />
+          <hr style={{ ...divider, margin: 0 }} />
+          <MoneyFlowSankey txs={monthTxs} width={500} />
+        </div>
+
+        {/* Right: Recent transactions */}
         <div>
           <div style={sectionEyebrow}>Recent transactions</div>
           {recentTx.length === 0 ? (
@@ -494,15 +503,6 @@ export function DashboardPage() {
               );
             })
           )}
-        </div>
-
-        {/* Right: Reports */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-          <IncomeVsExpenses txs={monthTxs} />
-          <hr style={{ ...divider, margin: 0 }} />
-          <UpcomingCashImpact schedules={schedules} freeCashCents={data.freeCashCents} />
-          <hr style={{ ...divider, margin: 0 }} />
-          <MoneyFlowSankey txs={monthTxs} width={500} />
         </div>
 
       </div>
