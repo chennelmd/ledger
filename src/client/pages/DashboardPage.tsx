@@ -202,21 +202,35 @@ function IncomeVsExpenses({ txs }: { txs: Transaction[] }) {
       <div style={sectionEyebrow}>Income vs. expenses</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
         {/* Income */}
-        <div style={{ background: '#F8F4EE', border: '1px solid #E7DFD0', borderRadius: 6, padding: '14px 16px' }}>
-          <div style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#A8A29E', fontWeight: 500, marginBottom: 6 }}>In</div>
-          <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 400, color: '#365142' }}>{fmt$(income)}</div>
-          <div style={{ marginTop: 8, height: 4, borderRadius: 2, background: '#E7DFD0', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${(income / barMax) * 100}%`, background: '#365142', borderRadius: 2 }} />
+        <Tooltip content={
+          <div style={{ fontSize: 12, lineHeight: 1.7, maxWidth: 220 }}>
+            <div style={{ color: '#A8A29E', marginBottom: 4 }}>Positive transactions on checking & savings accounts, excluding transfers between accounts.</div>
+            <div style={{ fontVariantNumeric: 'tabular-nums', color: '#365142' }}>{fmt$(income)} this month</div>
           </div>
-        </div>
+        }>
+          <div style={{ background: '#F8F4EE', border: '1px solid #E7DFD0', borderRadius: 6, padding: '14px 16px', cursor: 'default' }}>
+            <div style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#A8A29E', fontWeight: 500, marginBottom: 6 }}>In</div>
+            <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 400, color: '#365142' }}>{fmt$(income)}</div>
+            <div style={{ marginTop: 8, height: 4, borderRadius: 2, background: '#E7DFD0', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${(income / barMax) * 100}%`, background: '#365142', borderRadius: 2 }} />
+            </div>
+          </div>
+        </Tooltip>
         {/* Expenses */}
-        <div style={{ background: '#F8F4EE', border: '1px solid #E7DFD0', borderRadius: 6, padding: '14px 16px' }}>
-          <div style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#A8A29E', fontWeight: 500, marginBottom: 6 }}>Out</div>
-          <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 400, color: expenses > income ? '#7A1F2B' : '#1C1917' }}>{fmt$(expenses)}</div>
-          <div style={{ marginTop: 8, height: 4, borderRadius: 2, background: '#E7DFD0', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${(expenses / barMax) * 100}%`, background: expenses > income ? '#7A1F2B' : '#78716C', borderRadius: 2 }} />
+        <Tooltip content={
+          <div style={{ fontSize: 12, lineHeight: 1.7, maxWidth: 220 }}>
+            <div style={{ color: '#A8A29E', marginBottom: 4 }}>Negative transactions on checking, savings, and credit card accounts, excluding transfers between accounts.</div>
+            <div style={{ fontVariantNumeric: 'tabular-nums', color: '#7A1F2B' }}>{fmt$(expenses)} this month</div>
           </div>
-        </div>
+        }>
+          <div style={{ background: '#F8F4EE', border: '1px solid #E7DFD0', borderRadius: 6, padding: '14px 16px', cursor: 'default' }}>
+            <div style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#A8A29E', fontWeight: 500, marginBottom: 6 }}>Out</div>
+            <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 400, color: expenses > income ? '#7A1F2B' : '#1C1917' }}>{fmt$(expenses)}</div>
+            <div style={{ marginTop: 8, height: 4, borderRadius: 2, background: '#E7DFD0', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${(expenses / barMax) * 100}%`, background: expenses > income ? '#7A1F2B' : '#78716C', borderRadius: 2 }} />
+            </div>
+          </div>
+        </Tooltip>
       </div>
       {income > 0 || expenses > 0 ? (
         <div style={{ fontSize: 12.5, color: net >= 0 ? '#365142' : '#7A1F2B' }}>
