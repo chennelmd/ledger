@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../../db/client.js';
@@ -14,20 +14,24 @@ function validateSplitsSum(splits: { amountCents: number }[], total: number): st
   return sum === total ? null : `splits sum (${sum}) must equal amountCents (${total})`;
 }
 
-// GET /api/transactions?accountId=&limit= — list with payee + category joined
-// Assumes single-split transactions (v1 constraint enforced by the UI)
+// GET /api/transactions?accountId=&limit=&since=YYYY-MM-DD&until=YYYY-MM-DD
 transactionsRouter.get('/', async (c) => {
   const accountId = c.req.query('accountId');
+  const since     = c.req.query('since');
+  const until     = c.req.query('until');
   const limit = Math.min(Number(c.req.query('limit') ?? 200), 500);
 
   const conditions = [isNull(schema.transactions.deletedAt)];
   if (accountId) conditions.push(eq(schema.transactions.accountId, accountId));
+  if (since)     conditions.push(gte(schema.transactions.date, since));
+  if (until)     conditions.push(lte(schema.transactions.date, until));
 
   const rows = await db
     .select({
       id: schema.transactions.id,
       accountId: schema.transactions.accountId,
       accountName: schema.accounts.name,
+      accountType: schema.accounts.type,
       date: schema.transactions.date,
       amountCents: schema.transactions.amountCents,
       payeeId: schema.transactions.payeeId,
@@ -37,6 +41,8 @@ transactionsRouter.get('/', async (c) => {
       reconciled: schema.transactions.reconciled,
       categoryId: schema.transactionSplits.categoryId,
       categoryName: schema.categories.name,
+      categoryGroupId: schema.categoryGroups.id,
+      categoryGroupName: schema.categoryGroups.name,
       splitId: schema.transactionSplits.id,
       splitAmountCents: schema.transactionSplits.amountCents,
       splitNotes: schema.transactionSplits.notes,
@@ -49,6 +55,7 @@ transactionsRouter.get('/', async (c) => {
     .leftJoin(schema.payees, eq(schema.transactions.payeeId, schema.payees.id))
     .leftJoin(schema.transactionSplits, eq(schema.transactionSplits.transactionId, schema.transactions.id))
     .leftJoin(schema.categories, eq(schema.transactionSplits.categoryId, schema.categories.id))
+    .leftJoin(schema.categoryGroups, eq(schema.categories.groupId, schema.categoryGroups.id))
     .leftJoin(transferAccounts, eq(schema.transactionSplits.transferAccountId, transferAccounts.id))
     .where(and(...conditions))
     .orderBy(desc(schema.transactions.date), desc(schema.transactions.createdAt))
