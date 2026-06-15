@@ -148,7 +148,19 @@ function Tooltip({ content, children }: { content: React.ReactNode; children: Re
   );
 }
 
-function SummaryCard({ label, value, sub }: { label: string; value: string; sub: string }) {
+function SummaryCard({ label, value, sub, tooltip }: { label: string; value: string; sub: string; tooltip?: React.ReactNode }) {
+  const valueEl = (
+    <div style={{
+      fontFamily: "'Fraunces', serif",
+      fontSize: 22,
+      fontWeight: 400,
+      letterSpacing: '-0.01em',
+      color: '#1C1917',
+      cursor: tooltip ? 'default' : undefined,
+    }}>
+      {value}
+    </div>
+  );
   return (
     <div style={{
       background: '#F8F4EE',
@@ -166,15 +178,7 @@ function SummaryCard({ label, value, sub }: { label: string; value: string; sub:
       }}>
         {label}
       </div>
-      <div style={{
-        fontFamily: "'Fraunces', serif",
-        fontSize: 22,
-        fontWeight: 400,
-        letterSpacing: '-0.01em',
-        color: '#1C1917',
-      }}>
-        {value}
-      </div>
+      {tooltip ? <Tooltip content={tooltip}>{valueEl}</Tooltip> : valueEl}
       <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 3 }}>{sub}</div>
     </div>
   );
@@ -413,6 +417,24 @@ export function DashboardPage() {
 
   const freeCashColor = data.freeCashCents < 0 ? '#7A1F2B' : '#365142';
   const netWorth = accounts.reduce((sum, a) => sum + a.balanceCents, 0);
+  const totalAssets = accounts.filter(a => a.type === 'asset').reduce((sum, a) => sum + a.balanceCents, 0);
+  const totalLiabilities = accounts.filter(a => a.type === 'liability').reduce((sum, a) => sum + a.balanceCents, 0);
+  const netWorthTooltip = (
+    <div style={{ fontSize: 12, lineHeight: 1.7 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
+        <span style={{ color: '#A8A29E' }}>Assets</span>
+        <span style={{ color: '#365142', fontVariantNumeric: 'tabular-nums' }}>{fmt$(totalAssets)}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
+        <span style={{ color: '#A8A29E' }}>Liabilities</span>
+        <span style={{ color: '#7A1F2B', fontVariantNumeric: 'tabular-nums' }}>{fmt$(totalLiabilities)}</span>
+      </div>
+      <div style={{ borderTop: '1px solid #E7DFD0', marginTop: 6, paddingTop: 6, display: 'flex', justifyContent: 'space-between', gap: 24 }}>
+        <span style={{ color: '#A8A29E' }}>Net worth</span>
+        <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt$(netWorth)}</span>
+      </div>
+    </div>
+  );
 
   return (
     <div>
@@ -459,7 +481,7 @@ export function DashboardPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, marginBottom: 28 }}>
         <SummaryCard label="Cash" value={fmt$(data.cashBalanceCents)} sub="total in accounts" />
         <SummaryCard label="Reserved" value={fmt$(data.reservedEnvelopeCents)} sub="budgeted to envelopes" />
-        <SummaryCard label="Net worth" value={fmt$(netWorth)} sub="across all accounts" />
+        <SummaryCard label="Net worth" value={fmt$(netWorth)} sub="across all accounts" tooltip={netWorthTooltip} />
       </div>
 
       {/* Two-column layout */}
