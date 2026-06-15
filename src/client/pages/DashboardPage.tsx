@@ -188,11 +188,14 @@ function SummaryCard({ label, value, sub, tooltip }: { label: string; value: str
 // ── Report: Income vs Expenses ────────────────────────────────────────────────
 
 function IncomeVsExpenses({ txs }: { txs: Transaction[] }) {
-  const nonTransfer = txs.filter(t => !t.transferAccountName && !t.transferId);
-  // Income: positive amounts flowing into asset accounts (salary, deposits)
-  const income   = nonTransfer.filter(t => t.accountType === 'asset' && t.amountCents > 0).reduce((s, t) => s + t.amountCents, 0);
-  // Expenses: negative amounts on asset accounts (direct debits) + liability accounts (credit card purchases)
-  const expenses = nonTransfer.filter(t => (t.accountType === 'asset' || t.accountType === 'liability') && t.amountCents < 0).reduce((s, t) => s + Math.abs(t.amountCents), 0);
+  // Deduplicate: split transactions produce one row per split, all with the same amountCents
+  const unique = Array.from(new Map(txs.map(t => [t.id, t])).values());
+  const assetTxs = unique.filter(t => t.accountType === 'asset');
+  // Income: positive deposits into asset accounts, excluding all transfers
+  const income   = assetTxs.filter(t => t.amountCents > 0 && !t.transferId && !t.transferAccountName).reduce((s, t) => s + t.amountCents, 0);
+  // Out: negative amounts from asset accounts, excluding only uncategorized transfers (e.g. checking→savings).
+  // Categorized transfers like credit card payments remain — they are real budgeted spending.
+  const expenses = assetTxs.filter(t => t.amountCents < 0 && !(t.transferId && !t.categoryName)).reduce((s, t) => s + Math.abs(t.amountCents), 0);
   const net      = income - expenses;
 
   const barMax = Math.max(income, expenses, 1);
@@ -219,7 +222,7 @@ function IncomeVsExpenses({ txs }: { txs: Transaction[] }) {
         {/* Expenses */}
         <Tooltip content={
           <div style={{ fontSize: 12, lineHeight: 1.7, maxWidth: 220 }}>
-            <div style={{ color: '#A8A29E', marginBottom: 4 }}>Negative transactions on checking, savings, and credit card accounts, excluding transfers between accounts.</div>
+            <div style={{ color: '#A8A29E', marginBottom: 4 }}>Negative transactions on checking & savings, including categorized payments like credit card debt. Excludes uncategorized transfers (e.g. checking → savings).</div>
             <div style={{ fontVariantNumeric: 'tabular-nums', color: '#7A1F2B' }}>{fmt$(expenses)} this month</div>
           </div>
         }>
