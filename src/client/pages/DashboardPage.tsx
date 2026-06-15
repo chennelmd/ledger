@@ -284,7 +284,7 @@ const SANKEY_COLORS = [
   '#5F7A8A', '#8A6B6B', '#7A8A5F', '#8A7A5F',
 ];
 
-function MoneyFlowSankey({ txs }: { txs: Transaction[] }) {
+function MoneyFlowSankey({ txs, width = 500 }: { txs: Transaction[]; width?: number }) {
   const assetTxs = txs.filter(t => t.accountType === 'asset' && !t.transferAccountName);
   const income   = assetTxs.filter(t => t.amountCents > 0).reduce((s, t) => s + t.amountCents, 0);
 
@@ -330,7 +330,7 @@ function MoneyFlowSankey({ txs }: { txs: Transaction[] }) {
     <div>
       <div style={sectionEyebrow}>Money flow by category group</div>
       <Sankey
-        width={660}
+        width={width}
         height={Math.max(180, nodes.length * 48)}
         data={{ nodes, links }}
         nodePadding={16}
@@ -415,7 +415,7 @@ export function DashboardPage() {
   const netWorth = accounts.reduce((sum, a) => sum + a.balanceCents, 0);
 
   return (
-    <div style={{ maxWidth: 720 }}>
+    <div>
 
       {/* Header */}
       <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#A8A29E', marginBottom: 4, fontWeight: 500 }}>
@@ -462,47 +462,50 @@ export function DashboardPage() {
         <SummaryCard label="Net worth" value={fmt$(netWorth)} sub="across all accounts" />
       </div>
 
-      {/* Recent transactions */}
+      {/* Two-column layout */}
       <hr style={divider} />
-      <div style={sectionEyebrow}>Recent transactions</div>
-      {recentTx.length === 0 ? (
-        <p style={{ color: '#A8A29E', fontSize: 13 }}>No transactions yet.</p>
-      ) : (
-        recentTx.map((tx, idx) => {
-          const payee = tx.payeeName
-            || (tx.transferAccountName ? `Transfer → ${tx.transferAccountName}` : null)
-            || tx.notes || '—';
-          const meta = [tx.categoryName, tx.accountName].filter(Boolean).join(' · ');
-          const isIncome = tx.amountCents > 0;
-          return (
-            <div key={tx.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderBottom: idx < recentTx.length - 1 ? '1px solid #F0EADD' : 'none' }}>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 500, color: '#1C1917' }}>{payee}</div>
-                {meta && <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 2 }}>{meta}</div>}
-              </div>
-              <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 16 }}>
-                <div style={{ fontSize: 13.5, color: isIncome ? '#365142' : '#1C1917', fontVariantNumeric: 'tabular-nums' }}>
-                  {isIncome ? '+' : ''}{fmt$(tx.amountCents)}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.5fr)', gap: 48, alignItems: 'start' }}>
+
+        {/* Left: Recent transactions */}
+        <div>
+          <div style={sectionEyebrow}>Recent transactions</div>
+          {recentTx.length === 0 ? (
+            <p style={{ color: '#A8A29E', fontSize: 13 }}>No transactions yet.</p>
+          ) : (
+            recentTx.map((tx, idx) => {
+              const payee = tx.payeeName
+                || (tx.transferAccountName ? `Transfer → ${tx.transferAccountName}` : null)
+                || tx.notes || '—';
+              const meta = [tx.categoryName, tx.accountName].filter(Boolean).join(' · ');
+              const isIncome = tx.amountCents > 0;
+              return (
+                <div key={tx.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderBottom: idx < recentTx.length - 1 ? '1px solid #F0EADD' : 'none' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 500, color: '#1C1917' }}>{payee}</div>
+                    {meta && <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 2 }}>{meta}</div>}
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 16 }}>
+                    <div style={{ fontSize: 13.5, color: isIncome ? '#365142' : '#1C1917', fontVariantNumeric: 'tabular-nums' }}>
+                      {isIncome ? '+' : ''}{fmt$(tx.amountCents)}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 2 }}>{shortDate(tx.date)}</div>
+                  </div>
                 </div>
-                <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 2 }}>{shortDate(tx.date)}</div>
-              </div>
-            </div>
-          );
-        })
-      )}
+              );
+            })
+          )}
+        </div>
 
-      {/* Income vs Expenses */}
-      <hr style={{ ...divider, marginTop: 24 }} />
-      <IncomeVsExpenses txs={monthTxs} />
+        {/* Right: Reports */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+          <IncomeVsExpenses txs={monthTxs} />
+          <hr style={{ ...divider, margin: 0 }} />
+          <UpcomingCashImpact schedules={schedules} freeCashCents={data.freeCashCents} />
+          <hr style={{ ...divider, margin: 0 }} />
+          <MoneyFlowSankey txs={monthTxs} width={500} />
+        </div>
 
-      {/* Upcoming cash impact */}
-      <hr style={{ ...divider, marginTop: 24 }} />
-      <UpcomingCashImpact schedules={schedules} freeCashCents={data.freeCashCents} />
-
-      {/* Sankey */}
-      <hr style={{ ...divider, marginTop: 24 }} />
-      <MoneyFlowSankey txs={monthTxs} />
-
+      </div>
     </div>
   );
 }
