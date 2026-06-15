@@ -389,23 +389,33 @@ export function DashboardPage() {
     queryFn: fetchFreeCash,
   });
 
-  const { data: recentTx = [] } = useQuery({
-    queryKey: ['transactions', 'recent'],
-    queryFn: fetchRecentTransactions,
-  });
-
   const { data: accounts = [] } = useQuery<AccountWithBalance[]>({
     queryKey: ['accounts'],
     queryFn: fetchAccounts,
   });
 
-  const { since, until } = data ? monthBounds(data.month) : { since: '', until: '' };
+  const currentMonth = data?.month ?? '';
+  const [viewMonth, setViewMonth] = useState('');
+  const effectiveMonth = viewMonth || currentMonth;
+  const isCurrentMonth = !viewMonth || viewMonth === currentMonth;
+
+  function shiftMonth(delta: number) {
+    const base = effectiveMonth || new Date().toISOString().slice(0, 7);
+    const [y, m] = base.split('-').map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    const next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    setViewMonth(next === currentMonth ? '' : next);
+  }
+
+  const { since, until } = effectiveMonth ? monthBounds(effectiveMonth) : { since: '', until: '' };
 
   const { data: monthTxs = [] } = useQuery({
     queryKey: ['transactions', 'month', since],
     queryFn: () => fetchMonthTransactions(since, until),
     enabled: !!since,
   });
+
+  const displayedTxs = [...monthTxs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
 
   const { data: schedules = [] } = useQuery<Schedule[]>({
     queryKey: ['schedules', 'upcoming-14'],
@@ -440,8 +450,12 @@ export function DashboardPage() {
     <div>
 
       {/* Header */}
-      <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#A8A29E', marginBottom: 4, fontWeight: 500 }}>
-        {monthLabel(data.month)}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+        <button onClick={() => shiftMonth(-1)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: '#A8A29E', fontSize: 16, lineHeight: 1 }}>‹</button>
+        <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#A8A29E', fontWeight: 500 }}>
+          {effectiveMonth ? monthLabel(effectiveMonth) : ''}
+        </div>
+        <button onClick={() => shiftMonth(1)} disabled={isCurrentMonth} style={{ background: 'none', border: 'none', cursor: isCurrentMonth ? 'default' : 'pointer', padding: '2px 4px', color: isCurrentMonth ? '#D6CFC4' : '#A8A29E', fontSize: 16, lineHeight: 1 }}>›</button>
       </div>
       <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 32, fontWeight: 500, letterSpacing: '-0.02em', color: '#1C1917', margin: '0 0 24px' }}>
         Dashboard
@@ -503,17 +517,17 @@ export function DashboardPage() {
         {/* Right: Recent transactions */}
         <div>
           <div style={sectionEyebrow}>Recent transactions</div>
-          {recentTx.length === 0 ? (
+          {displayedTxs.length === 0 ? (
             <p style={{ color: '#A8A29E', fontSize: 13 }}>No transactions yet.</p>
           ) : (
-            recentTx.map((tx, idx) => {
+            displayedTxs.map((tx, idx) => {
               const payee = tx.payeeName
                 || (tx.transferAccountName ? `Transfer → ${tx.transferAccountName}` : null)
                 || tx.notes || '—';
               const meta = [tx.categoryName, tx.accountName].filter(Boolean).join(' · ');
               const isIncome = tx.amountCents > 0;
               return (
-                <div key={tx.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderBottom: idx < recentTx.length - 1 ? '1px solid #F0EADD' : 'none' }}>
+                <div key={tx.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderBottom: idx < displayedTxs.length - 1 ? '1px solid #F0EADD' : 'none' }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 500, color: '#1C1917' }}>{payee}</div>
                     {meta && <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 2 }}>{meta}</div>}
