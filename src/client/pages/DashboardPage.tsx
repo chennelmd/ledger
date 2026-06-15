@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { Account } from '../../db/schema.js';
 
@@ -64,6 +65,38 @@ const shortDate = (iso: string) => {
 };
 
 // ─── sub-components ───────────────────────────────────────────────────────────
+
+function Tooltip({ content, children }: { content: React.ReactNode; children: React.ReactNode }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <span
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={() => setVisible(true)}
+      onMouseLeave={() => setVisible(false)}
+    >
+      {children}
+      {visible && (
+        <div style={{
+          position: 'absolute',
+          top: 'calc(100% + 8px)',
+          left: 0,
+          background: '#1C1917',
+          color: '#FBF8F1',
+          padding: '10px 14px',
+          fontSize: 12,
+          lineHeight: 1.6,
+          width: 'max-content',
+          maxWidth: 280,
+          zIndex: 200,
+          pointerEvents: 'none',
+          borderRadius: 4,
+        }}>
+          {content}
+        </div>
+      )}
+    </span>
+  );
+}
 
 function SummaryCard({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
@@ -147,7 +180,7 @@ export function DashboardPage() {
         Dashboard
       </h1>
 
-      {/* Free cash hero */}
+      {/* Unassigned cash hero */}
       <div style={{
         fontSize: 10,
         letterSpacing: '0.14em',
@@ -156,19 +189,50 @@ export function DashboardPage() {
         fontWeight: 500,
         marginBottom: 4,
       }}>
-        Free cash right now
+        Unassigned cash
       </div>
-      <div style={{
-        fontFamily: "'Fraunces', serif",
-        fontSize: 52,
-        fontWeight: 400,
-        letterSpacing: '-0.02em',
-        color: freeCashColor,
-        lineHeight: 1,
-        marginBottom: 28,
-      }}>
-        {fmt$(data.freeCashCents)}
-      </div>
+      <Tooltip content={
+        <div style={{ fontVariantNumeric: 'tabular-nums' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
+            <span>Cash accounts</span><span>{fmt$(data.cashBalanceCents)}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
+            <span>Reserved for budget</span><span>−{fmt$(data.reservedEnvelopeCents)}</span>
+          </div>
+          {data.debtPaymentCents > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
+              <span>Debt payments</span><span>−{fmt$(data.debtPaymentCents)}</span>
+            </div>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
+            <span>Scheduled – Unbudgeted</span><span>−{fmt$(data.uncoveredScheduledOutflowsCents)}</span>
+          </div>
+          <div style={{
+            borderTop: '1px solid rgba(255,255,255,0.2)',
+            marginTop: 6,
+            paddingTop: 6,
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 24,
+            fontWeight: 500,
+          }}>
+            <span>Unassigned cash</span><span>{fmt$(data.freeCashCents)}</span>
+          </div>
+        </div>
+      }>
+        <div style={{
+          fontFamily: "'Fraunces', serif",
+          fontSize: 52,
+          fontWeight: 400,
+          letterSpacing: '-0.02em',
+          color: freeCashColor,
+          lineHeight: 1,
+          marginBottom: 28,
+          cursor: 'default',
+        }}>
+          {fmt$(data.freeCashCents)}
+        </div>
+      </Tooltip>
 
       {/* Summary cards */}
       <div style={{
