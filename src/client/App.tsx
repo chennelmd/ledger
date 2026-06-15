@@ -302,7 +302,7 @@ export function App() {
         {view === 'debt'      && <DebtPage />}
         {view === 'accounts'  && <AccountsPage onNavigateToLedger={goLedger} />}
         {view === 'budget'    && <BudgetPage />}
-        {view === 'ledger'    && <LedgerPage initialAccountId={ledgerAccountId} />}
+        {view === 'ledger'    && <LedgerPage key={ledgerAccountId} initialAccountId={ledgerAccountId} />}
         {view === 'schedules' && <SchedulesPage />}
         {view === 'help'      && <HelpPage />}
       </main>

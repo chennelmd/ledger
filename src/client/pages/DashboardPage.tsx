@@ -29,6 +29,7 @@ type Transaction = {
   categoryGroupName: string | null;
   accountName: string | null;
   transferAccountName: string | null;
+  transferId: string | null;
 };
 
 type Schedule = {
@@ -187,7 +188,7 @@ function SummaryCard({ label, value, sub, tooltip }: { label: string; value: str
 // ── Report: Income vs Expenses ────────────────────────────────────────────────
 
 function IncomeVsExpenses({ txs }: { txs: Transaction[] }) {
-  const assetTxs = txs.filter(t => t.accountType === 'asset' && !t.transferAccountName);
+  const assetTxs = txs.filter(t => t.accountType === 'asset' && !t.transferAccountName && !t.transferId);
   const income   = assetTxs.filter(t => t.amountCents > 0).reduce((s, t) => s + t.amountCents, 0);
   const expenses = assetTxs.filter(t => t.amountCents < 0).reduce((s, t) => s + Math.abs(t.amountCents), 0);
   const net      = income - expenses;
@@ -289,7 +290,7 @@ const SANKEY_COLORS = [
 ];
 
 function MoneyFlowSankey({ txs, width = 500 }: { txs: Transaction[]; width?: number }) {
-  const assetTxs = txs.filter(t => t.accountType === 'asset' && !t.transferAccountName);
+  const assetTxs = txs.filter(t => t.accountType === 'asset' && !t.transferAccountName && !t.transferId);
   const income   = assetTxs.filter(t => t.amountCents > 0).reduce((s, t) => s + t.amountCents, 0);
 
   const byGroup = new Map<string, number>();
@@ -427,7 +428,8 @@ export function DashboardPage() {
 
   const freeCashColor = data.freeCashCents < 0 ? '#7A1F2B' : '#365142';
   const netWorth = accounts.reduce((sum, a) => sum + a.balanceCents, 0);
-  const totalAssets = accounts.filter(a => a.type === 'asset').reduce((sum, a) => sum + a.balanceCents, 0);
+  const totalAssets      = accounts.filter(a => a.type === 'asset').reduce((sum, a) => sum + a.balanceCents, 0);
+  const totalTracking    = accounts.filter(a => a.type === 'tracking').reduce((sum, a) => sum + a.balanceCents, 0);
   const totalLiabilities = accounts.filter(a => a.type === 'liability').reduce((sum, a) => sum + a.balanceCents, 0);
   const netWorthTooltip = (
     <div style={{ fontSize: 12, lineHeight: 1.7 }}>
@@ -435,6 +437,12 @@ export function DashboardPage() {
         <span style={{ color: '#A8A29E' }}>Assets</span>
         <span style={{ color: '#365142', fontVariantNumeric: 'tabular-nums' }}>{fmt$(totalAssets)}</span>
       </div>
+      {totalTracking !== 0 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
+          <span style={{ color: '#A8A29E' }}>Tracking</span>
+          <span style={{ color: '#365142', fontVariantNumeric: 'tabular-nums' }}>{fmt$(totalTracking)}</span>
+        </div>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
         <span style={{ color: '#A8A29E' }}>Liabilities</span>
         <span style={{ color: '#7A1F2B', fontVariantNumeric: 'tabular-nums' }}>{fmt$(totalLiabilities)}</span>
