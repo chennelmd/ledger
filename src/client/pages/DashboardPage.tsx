@@ -188,9 +188,11 @@ function SummaryCard({ label, value, sub, tooltip }: { label: string; value: str
 // ── Report: Income vs Expenses ────────────────────────────────────────────────
 
 function IncomeVsExpenses({ txs }: { txs: Transaction[] }) {
-  const assetTxs = txs.filter(t => t.accountType === 'asset' && !t.transferAccountName && !t.transferId);
-  const income   = assetTxs.filter(t => t.amountCents > 0).reduce((s, t) => s + t.amountCents, 0);
-  const expenses = assetTxs.filter(t => t.amountCents < 0).reduce((s, t) => s + Math.abs(t.amountCents), 0);
+  const nonTransfer = txs.filter(t => !t.transferAccountName && !t.transferId);
+  // Income: positive amounts flowing into asset accounts (salary, deposits)
+  const income   = nonTransfer.filter(t => t.accountType === 'asset' && t.amountCents > 0).reduce((s, t) => s + t.amountCents, 0);
+  // Expenses: negative amounts on asset accounts (direct debits) + liability accounts (credit card purchases)
+  const expenses = nonTransfer.filter(t => (t.accountType === 'asset' || t.accountType === 'liability') && t.amountCents < 0).reduce((s, t) => s + Math.abs(t.amountCents), 0);
   const net      = income - expenses;
 
   const barMax = Math.max(income, expenses, 1);
@@ -290,11 +292,11 @@ const SANKEY_COLORS = [
 ];
 
 function MoneyFlowSankey({ txs, width = 500 }: { txs: Transaction[]; width?: number }) {
-  const assetTxs = txs.filter(t => t.accountType === 'asset' && !t.transferAccountName && !t.transferId);
-  const income   = assetTxs.filter(t => t.amountCents > 0).reduce((s, t) => s + t.amountCents, 0);
+  const nonTransfer = txs.filter(t => !t.transferAccountName && !t.transferId);
+  const income = nonTransfer.filter(t => t.accountType === 'asset' && t.amountCents > 0).reduce((s, t) => s + t.amountCents, 0);
 
   const byGroup = new Map<string, number>();
-  assetTxs.filter(t => t.amountCents < 0 && t.categoryGroupName).forEach(t => {
+  nonTransfer.filter(t => (t.accountType === 'asset' || t.accountType === 'liability') && t.amountCents < 0 && t.categoryGroupName).forEach(t => {
     const g = t.categoryGroupName!;
     byGroup.set(g, (byGroup.get(g) ?? 0) + Math.abs(t.amountCents));
   });
