@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Target } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, Target } from 'lucide-react';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +75,24 @@ async function putAssignment(month: string, categoryId: string, assignedCents: n
   });
   if (!res.ok) throw new Error('failed to save');
   return res.json();
+}
+
+// Copy all non-zero assignments from prevMonth into targetMonth, skipping categories
+// that already have an assignment in targetMonth.
+async function copyBudgetFromPrevMonth(prevMonth: string, targetMonth: string): Promise<void> {
+  const [prev, curr] = await Promise.all([
+    fetchBudget(prevMonth),
+    fetchBudget(targetMonth),
+  ]);
+  const currAssigned = new Map(
+    curr.groups.flatMap((g) => g.categories).map((c) => [c.id, c.assignedCents])
+  );
+  const toCopy = prev.groups
+    .flatMap((g) => g.categories)
+    .filter((c) => !c.isIncome && c.assignedCents !== 0 && (currAssigned.get(c.id) ?? 0) === 0);
+  await Promise.all(
+    toCopy.map((c) => putAssignment(targetMonth, c.id, c.assignedCents))
+  );
 }
 
 async function postGroup(name: string) {
@@ -852,6 +870,11 @@ export function BudgetPage() {
     },
   });
 
+  const copyPrev = useMutation({
+    mutationFn: () => copyBudgetFromPrevMonth(shiftMonth(month, -1), month),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['budget'] }),
+  });
+
   return (
     <div>
       {/* Top bar */}
@@ -865,6 +888,22 @@ export function BudgetPage() {
             <ChevronRight size={16} />
           </button>
         </div>
+
+        <button
+          onClick={() => copyPrev.mutate()}
+          disabled={copyPrev.isPending}
+          title={`Copy assignments from ${monthLabel(shiftMonth(month, -1))}`}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: 'none', border: '1px solid #E7DFD0', cursor: 'pointer',
+            padding: '5px 12px', fontSize: 12, color: '#78716C', fontFamily: 'inherit',
+            whiteSpace: 'nowrap' as const,
+            opacity: copyPrev.isPending ? 0.5 : 1,
+          }}
+        >
+          <Copy size={13} />
+          {copyPrev.isPending ? 'Copying…' : 'Copy prev month'}
+        </button>
 
         <div style={S.toggleGroup}>
           {([1, 2, 3] as const).map((n) => (
