@@ -464,7 +464,7 @@ export function DashboardPage() {
 
       {/* Two-column layout */}
       <hr style={divider} />
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: 48, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) 1px minmax(0, 1fr)', gap: 48, alignItems: 'start' }}>
 
         {/* Left: Reports */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
@@ -474,6 +474,9 @@ export function DashboardPage() {
           <hr style={{ ...divider, margin: 0 }} />
           <MoneyFlowSankey txs={monthTxs} width={500} />
         </div>
+
+        {/* Vertical divider */}
+        <div style={{ background: '#E7DFD0', alignSelf: 'stretch' }} />
 
         {/* Right: Recent transactions */}
         <div>
