@@ -84,6 +84,15 @@ dashboardRouter.get('/free-cash', async (c) => {
   const prevMonth    = prevMonthOf(month);
   const prevMonthEnd = lastDayOf(prevMonth);
 
+  // Compute the 30-day window end month before queries so we can fetch future assignments.
+  const _today = startOfToday();
+  const _end30d = new Date(_today);
+  _end30d.setUTCDate(_end30d.getUTCDate() + 30);
+  const end30dMonth = toDateOnly(_end30d).slice(0, 7);
+  // Fetch assignments through the window end month so future budget assignments
+  // can be used to determine whether upcoming scheduled outflows are covered.
+  const assignedRowsUpperBound = end30dMonth > month ? end30dMonth : month;
+
   const [
     accounts,
     accountTxnSums,
@@ -147,14 +156,15 @@ dashboardRouter.get('/free-cash', async (c) => {
       ))
       .orderBy(schema.categoryGroups.sortOrder, schema.categories.sortOrder),
 
-    // 5. Budget assignments through current month
+    // 5. Budget assignments through window end month (future months beyond current month
+    //    are only used for the scheduled-outflow coverage check, not the balance walk).
     db.select({
       month: schema.budgets.month,
       categoryId: schema.budgets.categoryId,
       total: sql<number>`coalesce(sum(${schema.budgets.assignedCents}), 0)`,
     })
       .from(schema.budgets)
-      .where(sql`${schema.budgets.month} <= ${month}`)
+      .where(sql`${schema.budgets.month} <= ${assignedRowsUpperBound}`)
       .groupBy(schema.budgets.month, schema.budgets.categoryId),
 
     // 6. Spending activity. Cash balance is all-time, so posted future
@@ -313,12 +323,31 @@ dashboardRouter.get('/free-cash', async (c) => {
       .filter(([, v]) => v > 0),
   ]);
 
+  // ── Augment reserve map with future-month budget assignments ─────────────
+  // For scheduled outflows within the 30-day window that fall in a future month,
+  // the user may have already assigned budget for that month. Add those assignments
+  // to the reserve so the outflow is treated as "covered" (budgeted), not unbudgeted.
+  if (end30dMonth > month) {
+    for (const cat of cats) {
+      if (cat.linkedDebtAccountId) continue; // debt categories handled separately
+      let futureAssigned = 0;
+      for (const [m, catMap] of assignedByMonth) {
+        if (m > month && m <= end30dMonth) {
+          futureAssigned += catMap.get(cat.id) ?? 0;
+        }
+      }
+      if (futureAssigned > 0) {
+        const current = reserveByCategoryId.get(cat.id) ?? 0;
+        reserveByCategoryId.set(cat.id, current + futureAssigned);
+      }
+    }
+  }
+
   // ── Scheduled outflow projections ─────────────────────────────────────────
 
-  const today   = startOfToday();
-  const end30d  = new Date(today);
-  end30d.setUTCDate(end30d.getUTCDate() + 30);
-  const endEOM  = new Date(`${lastDayOf(month)}T23:59:59.000Z`);
+  const today  = _today;
+  const end30d = _end30d;
+  const endEOM = new Date(`${lastDayOf(month)}T23:59:59.000Z`);
 
   const now30 = computeScheduled(schedules, today, end30d, reserveByCategoryId);
   const nowEOM = computeScheduled(schedules, today, endEOM, reserveByCategoryId);
