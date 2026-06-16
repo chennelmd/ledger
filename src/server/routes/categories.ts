@@ -6,34 +6,54 @@ import { NewCategoryGroupSchema, NewCategorySchema } from '../../shared/schemas.
 
 export const categoriesRouter = new Hono();
 
-// GET /api/categories/hidden — hidden/deleted groups AND hidden/deleted categories in visible groups
+// GET /api/categories/debug — all groups and categories with no filtering (diagnostic)
+categoriesRouter.get('/debug', async (c) => {
+  const [groups, cats] = await Promise.all([
+    db.select().from(schema.categoryGroups).orderBy(schema.categoryGroups.sortOrder),
+    db.select().from(schema.categories).orderBy(schema.categories.sortOrder),
+  ]);
+  return c.json({
+    groups: groups.map(g => ({ id: g.id, name: g.name, isHidden: g.isHidden, deletedAt: g.deletedAt })),
+    categories: cats.map(c => ({ id: c.id, name: c.name, groupId: c.groupId, isHidden: c.isHidden, deletedAt: c.deletedAt })),
+  });
+});
+
+// GET /api/categories/hidden — hidden/deleted groups and categories not shown on budget page
 categoriesRouter.get('/hidden', async (c) => {
   const [allGroups, allCats] = await Promise.all([
     db.select().from(schema.categoryGroups).orderBy(schema.categoryGroups.sortOrder),
     db.select().from(schema.categories).orderBy(schema.categories.sortOrder),
   ]);
 
-  const hiddenGroupIds = new Set(
-    allGroups
-      .filter(g => g.isHidden || g.deletedAt)
-      .map(g => g.id)
-  );
+  const allGroupIds = new Set(allGroups.map(g => g.id));
+  const hiddenGroupIds = new Set(allGroups.filter(g => g.isHidden || g.deletedAt).map(g => g.id));
 
-  // Groups: hidden or deleted
+  // Hidden/deleted groups with their categories
   const hiddenGroups = allGroups
     .filter(g => g.isHidden || g.deletedAt)
-    .map(g => ({ ...g, categories: allCats.filter(c => c.groupId === g.id) }));
+    .map(g => ({ ...g, _orphanedCatsOnly: false, categories: allCats.filter(c => c.groupId === g.id) }));
 
-  // Orphaned categories: hidden or deleted, but in a visible group
-  const orphanedCats = allCats.filter(c => (c.isHidden || c.deletedAt) && !hiddenGroupIds.has(c.groupId));
-  const orphanGroups = allGroups.filter(g => orphanedCats.some(c => c.groupId === g.id));
-  const orphanResult = orphanGroups.map(g => ({
-    ...g,
-    isHidden: false,
-    deletedAt: null,
-    _orphanedCatsOnly: true,
-    categories: orphanedCats.filter(c => c.groupId === g.id),
-  }));
+  // Categories not in hiddenGroups that are themselves hidden/deleted OR whose group is gone
+  const extraCats = allCats.filter(c =>
+    !hiddenGroupIds.has(c.groupId) &&
+    (c.isHidden || c.deletedAt || !allGroupIds.has(c.groupId))
+  );
+
+  // Group them by their parent group (or synthetic orphan bucket)
+  const extraByGroup = new Map<string, typeof allCats>();
+  for (const cat of extraCats) {
+    const key = allGroupIds.has(cat.groupId) ? cat.groupId : '__orphan__';
+    if (!extraByGroup.has(key)) extraByGroup.set(key, []);
+    extraByGroup.get(key)!.push(cat);
+  }
+
+  const orphanResult = Array.from(extraByGroup.entries()).map(([groupId, cats]) => {
+    if (groupId === '__orphan__') {
+      return { id: '__orphan__', name: 'No Group', isHidden: false, deletedAt: null, sortOrder: 999, _orphanedCatsOnly: true, categories: cats };
+    }
+    const g = allGroups.find(g => g.id === groupId)!;
+    return { ...g, _orphanedCatsOnly: true, categories: cats };
+  });
 
   return c.json([...hiddenGroups, ...orphanResult]);
 });
