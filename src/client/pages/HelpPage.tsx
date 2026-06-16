@@ -154,7 +154,11 @@ export function HelpPage() {
           <div style={S.termDef}>Live balance across all on-budget checking, savings, and cash accounts.</div>
 
           <div style={S.term}>Reserved for Budget</div>
-          <div style={S.termDef}>The total of all positive category balances. Money you've already assigned to envelopes is spoken for, even if not yet spent.</div>
+          <div style={S.termDef}>
+            The total of all positive category balances plus any debt payment amounts assigned this month that haven't been transferred yet.
+            Money you've already assigned to envelopes is spoken for, even if not yet spent.
+            Hover the Reserved card on the Dashboard to see a full breakdown by envelope.
+          </div>
 
           <div style={S.term}>Scheduled – Unbudgeted</div>
           <div style={S.termDef}>Upcoming bills/income from the Schedules page that fall within the selected window and aren't already covered by a category reserve.</div>
@@ -199,14 +203,18 @@ export function HelpPage() {
           <div style={S.termDef}>How much you budgeted to this category in a given month. Set this on the Budget page.</div>
 
           <div style={S.term}>Activity</div>
-          <div style={S.termDef}>All transactions posted to this category during the month. Spending is negative; income or refunds are positive.</div>
+          <div style={S.termDef}>
+            All categorized transactions posted to this category during the month. Spending is negative; refunds are positive.
+            For split transactions, only the amount allocated to this category counts — not the full transaction total.
+            Uncategorized splits are excluded entirely.
+          </div>
 
           <div style={S.term}>Available</div>
           <div style={S.termDef}>The current balance of the envelope. If positive, that money is sitting in your accounts reserved for this purpose. If negative, you've overspent.</div>
         </div>
 
         <div style={S.callout}>
-          The sum of all positive Available balances is what appears as <strong>Reserved for Budget</strong> on the Dashboard. It's money that's in your accounts but already earmarked.
+          The sum of all positive Available balances (plus unfunded debt payments) is what appears as <strong>Reserved for Budget</strong> on the Dashboard. It's money that's in your accounts but already earmarked.
         </div>
       </section>
 
@@ -234,14 +242,98 @@ export function HelpPage() {
           <div style={S.term}>Goals</div>
           <div style={S.termDef}>Optional targets you can set per category. The small progress bar under the Available amount shows how close you are. Hover the bar to set or change the goal.</div>
 
+          <div style={S.term}>Move to group</div>
+          <div style={S.termDef}>Hover a category name and click the ⋯ button to move it to a different group. Useful for reorganizing without losing history.</div>
+
+          <div style={S.term}>Hidden categories</div>
+          <div style={S.termDef}>Categories or groups that have been hidden or deleted appear in a section at the bottom of the Budget page. You can restore them to their original group or move them to a new one.</div>
+
           <div style={S.term}>Debt categories</div>
-          <div style={S.termDef}>Categories in the Debt Payments group are linked to a liability account (credit card, loan). Spending on that card flows through the linked category automatically.</div>
+          <div style={S.termDef}>Categories linked to a liability account (credit card) are managed on the Debt page, not here. They are hidden from the Budget view to keep it focused on spending decisions.</div>
         </div>
       </section>
 
-      {/* ── 04 Scheduled – Unbudgeted ─────────────────────────────── */}
+      {/* ── 04 Accounts ───────────────────────────────────────────── */}
       <section style={S.section}>
         <div style={S.sectionNumber}>04</div>
+        <h2 style={S.sectionTitle}>Accounts</h2>
+
+        <p style={S.body}>
+          Accounts come in three types. Understanding the difference matters for how balances flow into your budget and net worth.
+        </p>
+
+        <div style={S.termGrid}>
+          <div style={S.term}>Asset</div>
+          <div style={S.termDef}>On-budget. Checking, savings, cash — money you have and can spend. These balances feed into Unassigned Cash and Ready to Assign.</div>
+
+          <div style={S.term}>Liability</div>
+          <div style={S.termDef}>On-budget. Credit cards and other debts you're actively paying down. Each gets a linked debt category. Tracked on the Debt page.</div>
+
+          <div style={S.term}>Tracking</div>
+          <div style={S.termDef}>Off-budget. Home value, car value, mortgage balance, investments. Not included in your spendable cash, but counted in net worth.</div>
+        </div>
+
+        <div style={S.callout}>
+          A mortgage should be set up as a <strong>Tracking</strong> account (subtype: Mortgage), not a Liability. This keeps the balance visible in net worth without creating a debt payment category. Your monthly mortgage payment is just a regular budget expense — enter it as a transaction categorized to a "Mortgage" expense category.
+        </div>
+
+        <p style={{ ...S.body, fontWeight: 600, marginBottom: 6 }}>Starting balances for debt accounts:</p>
+        <p style={S.body}>
+          Enter the amount you owe as a positive number. The app stores it as negative automatically — for Liability accounts and for Tracking accounts with the Mortgage or Loan subtype.
+        </p>
+      </section>
+
+      {/* ── 05 Income vs. Expenses (IN / OUT) ─────────────────────── */}
+      <section style={S.section}>
+        <div style={S.sectionNumber}>05</div>
+        <h2 style={S.sectionTitle}>Income vs. Expenses (IN / OUT)</h2>
+
+        <p style={S.body}>
+          The IN and OUT cards on the Dashboard summarize money movement for the selected month.
+        </p>
+
+        <div style={S.termGrid}>
+          <div style={S.term}>IN</div>
+          <div style={S.termDef}>
+            Total positive transactions in on-budget asset accounts. Transfers between your own asset accounts (e.g., moving money from savings to checking) are excluded so they don't inflate income.
+          </div>
+
+          <div style={S.term}>OUT</div>
+          <div style={S.termDef}>
+            Total of all categorized spending across every account — credit card purchases, bills, debt payments. For split transactions, only the categorized portion of each split counts. Pure transfers with no budget category (e.g., paying off a credit card in full from checking) are excluded.
+          </div>
+        </div>
+
+        <div style={S.callout}>
+          The <strong>Money Flow</strong> chart below IN / OUT visualizes the same income flowing into each category group as a Sankey diagram.
+        </div>
+      </section>
+
+      {/* ── 06 Net Worth ──────────────────────────────────────────── */}
+      <section style={S.section}>
+        <div style={S.sectionNumber}>06</div>
+        <h2 style={S.sectionTitle}>Net Worth</h2>
+
+        <p style={S.body}>
+          Net worth is the sum of every account balance — assets, liabilities, and tracking accounts combined. Hover the Net Worth card on the Dashboard to see it broken down by account type.
+        </p>
+
+        <div style={S.formulaCard}>
+          <div style={S.formulaRow}><span style={S.formulaOperator}> </span><span>Asset balances</span></div>
+          <div style={S.formulaRow}><span style={S.formulaOperator}>+</span><span>Tracking balances (home, car, mortgage…)</span></div>
+          <div style={S.formulaRow}><span style={S.formulaOperator}>+</span><span>Liability balances (negative — money owed)</span></div>
+          <hr style={S.formulaDivider} />
+          <div style={S.formulaResult}><span style={{ minWidth: 12 }}> </span><span>Net Worth</span></div>
+        </div>
+
+        <p style={S.body}>
+          Tracking accounts with the Mortgage or Loan subtype store a negative balance, so they correctly reduce net worth just like a liability. The difference is they're off-budget — they don't create debt categories or affect your spendable cash calculation.
+        </p>
+      </section>
+
+      {/* ── 07 Scheduled – Unbudgeted ─────────────────────────────── */}
+      <section style={S.section}>
+        <div style={S.sectionNumber}>07</div>
         <h2 style={S.sectionTitle}>Scheduled – Unbudgeted</h2>
 
         <p style={S.body}>
@@ -264,9 +356,9 @@ export function HelpPage() {
         </div>
       </section>
 
-      {/* ── 05 Reconciliation ─────────────────────────────────────── */}
+      {/* ── 08 Reconciliation ─────────────────────────────────────── */}
       <section style={S.section}>
-        <div style={S.sectionNumber}>05</div>
+        <div style={S.sectionNumber}>08</div>
         <h2 style={S.sectionTitle}>Reconciliation</h2>
 
         <p style={S.body}>
@@ -293,9 +385,9 @@ export function HelpPage() {
         </div>
       </section>
 
-      {/* ── 06 Tags ───────────────────────────────────────────────── */}
+      {/* ── 09 Tags ───────────────────────────────────────────────── */}
       <section style={S.section}>
-        <div style={S.sectionNumber}>06</div>
+        <div style={S.sectionNumber}>09</div>
         <h2 style={S.sectionTitle}>Tags</h2>
 
         <p style={S.body}>
