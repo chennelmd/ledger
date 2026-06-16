@@ -38,12 +38,6 @@ if (!isProd) {
   app.use('/api/*', cors({ origin: process.env.CORS_ORIGIN ?? 'http://localhost:5173' }));
 }
 
-// In production, serve the Vite-built client. Static assets (JS, CSS, fonts)
-// are served directly; any non-file path falls through to the SPA fallback.
-if (isProd) {
-  app.use('/*', serveStatic({ root: './dist/client' }));
-}
-
 app.get('/api/health', (c) => c.json({ ok: true, ts: new Date().toISOString() }));
 
 app.route('/api/accounts', accountsRouter);
@@ -54,6 +48,11 @@ app.route('/api/budget', budgetRouter);
 app.route('/api/dashboard', dashboardRouter);
 app.route('/api/schedules', schedulesRouter);
 app.route('/api/tags', tagsRouter);
+
+// In production, serve the Vite-built client after API routes so /api/* is never intercepted.
+if (isProd) {
+  app.use('/*', serveStatic({ root: './dist/client' }));
+}
 
 // SPA fallback in production: any request that didn't match a static file or
 // API route gets the React shell so the client-side router can take over.
