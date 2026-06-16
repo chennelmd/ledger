@@ -515,11 +515,7 @@ export function DashboardPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
             <span>Reserved for budget</span><span>−{fmt$(data.reservedEnvelopeCents)}</span>
           </div>
-          {data.debtPaymentCents > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
-              <span>Debt payments</span><span>−{fmt$(data.debtPaymentCents)}</span>
-            </div>
-          )}
+
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
             <span>Scheduled – Unbudgeted</span><span>−{fmt$(data.uncoveredScheduledOutflowsCents)}</span>
           </div>

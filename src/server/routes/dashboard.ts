@@ -390,18 +390,21 @@ dashboardRouter.get('/free-cash', async (c) => {
   // Excludes scheduled outflows — those change window-to-window and would make trend noisy.
   const prevMonthNetCents = prevCashBalanceCents - prevReservedCents - prevDebtPaymentCents;
 
+  // Merge debt payments into reserved — both represent money already spoken for
+  const totalReservedCents = reservedEnvelopeCents + debtPaymentCents;
+
   return c.json({
     month,
     cashBalanceCents,
-    reservedEnvelopeCents,
+    reservedEnvelopeCents: totalReservedCents,
     debtPaymentCents,
     // 30-day window
     scheduledOutflowsCents:          now30.totalCents,
     uncoveredScheduledOutflowsCents: now30.uncoveredCents,
-    freeCashCents:                   cashBalanceCents - reservedEnvelopeCents - debtPaymentCents - now30.uncoveredCents,
+    freeCashCents:                   cashBalanceCents - totalReservedCents - now30.uncoveredCents,
     // End-of-month window
     uncoveredScheduledOutflowsEOMCents: nowEOM.uncoveredCents,
-    freeCashEOMCents:                   cashBalanceCents - reservedEnvelopeCents - debtPaymentCents - nowEOM.uncoveredCents,
+    freeCashEOMCents:                   cashBalanceCents - totalReservedCents - nowEOM.uncoveredCents,
     // Trend signal: (cash − reserved) at end of previous month, no scheduled component
     prevMonthNetCents,
     cashAccounts,
