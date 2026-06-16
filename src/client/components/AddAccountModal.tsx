@@ -275,10 +275,11 @@ export function AddAccountModal({ onClose, account }: Props) {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    // Always take absolute value so entering -3750 or 3750 for a liability both work
+    // Always take absolute value so entering -3750 or 3750 both work
     const rawCents = Math.abs(Math.round(parseFloat(balance || '0') * 100));
-    // Liabilities are debts — store as negative so balance math works uniformly
-    const startingBalanceCents = type === 'liability' ? -rawCents : rawCents;
+    // Liabilities and debt-tracking accounts store as negative (money owed)
+    const isDebt = type === 'liability' || (type === 'tracking' && (subtype === 'mortgage' || subtype === 'loan'));
+    const startingBalanceCents = isDebt ? -rawCents : rawCents;
     const payload: Record<string, unknown> = {
       name: name.trim(),
       type,
