@@ -47,6 +47,7 @@ transactionsRouter.get('/', async (c) => {
       splitAmountCents: schema.transactionSplits.amountCents,
       splitNotes: schema.transactionSplits.notes,
       transferId: schema.transactions.transferId,
+      transferAccountId: schema.transactionSplits.transferAccountId,
       transferAccountName: transferAccounts.name,
       createdAt: schema.transactions.createdAt,
     })

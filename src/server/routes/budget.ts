@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, isNotNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../../db/client.js';
@@ -65,6 +65,7 @@ budgetRouter.get('/:month', async (c) => {
       .leftJoin(linkedDebtCategories, eq(linkedDebtCategories.linkedDebtAccountId, schema.transactionSplits.transferAccountId))
       .where(and(
         isNull(schema.transactions.deletedAt),
+        isNotNull(activityCategoryId),
         sql`strftime('%Y-%m', ${schema.transactions.date}) = ${month}`,
       ))
       .groupBy(activityCategoryId),
@@ -80,6 +81,7 @@ budgetRouter.get('/:month', async (c) => {
       .leftJoin(linkedDebtCategories, eq(linkedDebtCategories.linkedDebtAccountId, schema.transactionSplits.transferAccountId))
       .where(and(
         isNull(schema.transactions.deletedAt),
+        isNotNull(activityCategoryId),
         sql`strftime('%Y-%m', ${schema.transactions.date}) <= ${month}`,
       ))
       .groupBy(

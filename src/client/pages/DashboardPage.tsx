@@ -29,6 +29,7 @@ type Transaction = {
   categoryGroupName: string | null;
   accountName: string | null;
   transferAccountName: string | null;
+  transferAccountId: string | null;
   transferId: string | null;
   splitAmountCents: number | null;
 };
@@ -189,13 +190,13 @@ function SummaryCard({ label, value, sub, tooltip }: { label: string; value: str
 // ── Report: Income vs Expenses ────────────────────────────────────────────────
 
 function IncomeVsExpenses({ txs, accounts }: { txs: Transaction[]; accounts: AccountWithBalance[] }) {
-  // Asset account names — used to filter income (exclude asset-to-asset incoming transfers)
-  const assetNames = new Set(accounts.filter(a => a.type === 'asset').map(a => a.name));
+  // Asset account IDs — used to filter income (exclude asset-to-asset incoming transfers)
+  const assetIds = new Set(accounts.filter(a => a.type === 'asset').map(a => a.id));
 
   // Income: positive amounts into asset accounts, excluding transfers from other asset accounts
   const unique = Array.from(new Map(txs.map(t => [t.id, t])).values());
   const income = unique
-    .filter(t => t.accountType === 'asset' && t.amountCents > 0 && !(t.transferAccountName && assetNames.has(t.transferAccountName)))
+    .filter(t => t.accountType === 'asset' && t.amountCents > 0 && !(t.transferAccountId && assetIds.has(t.transferAccountId)))
     .reduce((s, t) => s + t.amountCents, 0);
 
   // Out: ALL categorized spending by split amount, across all account types.
@@ -319,10 +320,11 @@ const SANKEY_COLORS = [
   '#5F7A8A', '#8A6B6B', '#7A8A5F', '#8A7A5F',
 ];
 
-function MoneyFlowSankey({ txs, width = 500 }: { txs: Transaction[]; width?: number }) {
-  // Income: deduplicated positive asset transactions (no transfers)
+function MoneyFlowSankey({ txs, accounts, width = 500 }: { txs: Transaction[]; accounts: AccountWithBalance[]; width?: number }) {
+  // Income: same logic as IN card — exclude asset-to-asset transfers by account ID
+  const assetIds = new Set(accounts.filter(a => a.type === 'asset').map(a => a.id));
   const unique = Array.from(new Map(txs.map(t => [t.id, t])).values());
-  const income = unique.filter(t => t.accountType === 'asset' && t.amountCents > 0 && !t.transferId && !t.transferAccountName).reduce((s, t) => s + t.amountCents, 0);
+  const income = unique.filter(t => t.accountType === 'asset' && t.amountCents > 0 && !(t.transferAccountId && assetIds.has(t.transferAccountId))).reduce((s, t) => s + t.amountCents, 0);
 
   // Group spending by category group using split amounts — same methodology as OUT
   const byGroup = new Map<string, number>();
@@ -548,7 +550,7 @@ export function DashboardPage() {
           <hr style={{ ...divider, margin: 0 }} />
           <UpcomingCashImpact schedules={schedules} freeCashCents={data.freeCashCents} />
           <hr style={{ ...divider, margin: 0 }} />
-          <MoneyFlowSankey txs={monthTxs} width={500} />
+          <MoneyFlowSankey txs={monthTxs} accounts={accounts} width={500} />
         </div>
 
         {/* Vertical divider */}
