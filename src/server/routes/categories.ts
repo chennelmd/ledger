@@ -1,17 +1,17 @@
 import { Hono } from 'hono';
-import { eq } from 'drizzle-orm';
+import { eq, or, isNotNull } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../../db/client.js';
 import { NewCategoryGroupSchema, NewCategorySchema } from '../../shared/schemas.js';
 
 export const categoriesRouter = new Hono();
 
-// GET /api/categories/hidden — hidden groups with their categories
+// GET /api/categories/hidden — hidden or soft-deleted groups with their categories
 categoriesRouter.get('/hidden', async (c) => {
   const groups = await db
     .select()
     .from(schema.categoryGroups)
-    .where(eq(schema.categoryGroups.isHidden, true))
+    .where(or(eq(schema.categoryGroups.isHidden, true), isNotNull(schema.categoryGroups.deletedAt)))
     .orderBy(schema.categoryGroups.sortOrder);
 
   const cats = await db
@@ -62,6 +62,20 @@ categoriesRouter.post('/groups', async (c) => {
     .get();
 
   return c.json(inserted, 201);
+});
+
+// POST /api/categories/groups/:id/restore — unhide and undelete a group
+categoriesRouter.post('/groups/:id/restore', async (c) => {
+  const id = c.req.param('id');
+  const updated = await db
+    .update(schema.categoryGroups)
+    .set({ isHidden: false, deletedAt: null, updatedAt: new Date().toISOString() })
+    .where(eq(schema.categoryGroups.id, id))
+    .returning()
+    .get();
+
+  if (!updated) return c.json({ error: 'not found' }, 404);
+  return c.json(updated);
 });
 
 // PATCH /api/categories/groups/:id — update a group

@@ -901,7 +901,7 @@ function HiddenGroupRow({ group, visibleGroups }: { group: HiddenGroup; visibleG
   const menuRef = useRef<HTMLDivElement>(null);
 
   const unhide = useMutation({
-    mutationFn: () => patchGroup(group.id, { isHidden: false }),
+    mutationFn: () => fetch(`/api/categories/groups/${group.id}/restore`, { method: 'POST' }).then(r => r.json()),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); qc.invalidateQueries({ queryKey: ['categories'] }); qc.invalidateQueries({ queryKey: ['categories', 'hidden'] }); },
   });
 
