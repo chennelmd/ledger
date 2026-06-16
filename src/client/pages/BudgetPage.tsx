@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Copy, Target } from 'lucide-react';
 
 // ─── types ────────────────────────────────────────────────────────────────────
@@ -61,6 +61,14 @@ function currentMonth() {
 }
 
 // ─── api ─────────────────────────────────────────────────────────────────────
+
+interface HiddenGroup { id: string; name: string; categories: { id: string; name: string }[] }
+
+async function fetchHiddenGroups(): Promise<HiddenGroup[]> {
+  const res = await fetch('/api/categories/hidden');
+  if (!res.ok) throw new Error('failed to fetch hidden groups');
+  return res.json();
+}
 
 async function fetchBudget(month: string): Promise<BudgetMonth> {
   const res = await fetch(`/api/budget/${month}`);
@@ -885,6 +893,84 @@ function CategoryRow({ cat, group, months, getCatMonth, gridCols, groups }: {
   );
 }
 
+// ─── HiddenGroupRow ───────────────────────────────────────────────────────────
+
+function HiddenGroupRow({ group, visibleGroups }: { group: HiddenGroup; visibleGroups: BudgetGroup[] }) {
+  const qc = useQueryClient();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const unhide = useMutation({
+    mutationFn: () => patchGroup(group.id, { isHidden: false }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); qc.invalidateQueries({ queryKey: ['categories'] }); qc.invalidateQueries({ queryKey: ['categories', 'hidden'] }); },
+  });
+
+  const moveCategory = useMutation({
+    mutationFn: ({ catId, groupId }: { catId: string; groupId: string }) => patchCategory(catId, { groupId }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); qc.invalidateQueries({ queryKey: ['categories'] }); qc.invalidateQueries({ queryKey: ['categories', 'hidden'] }); },
+  });
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handler(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '8px 0', borderBottom: '1px solid #F0EADD' }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: '#78716C', marginBottom: 4 }}>{group.name}</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {group.categories.map((cat) => (
+            <div key={cat.id} style={{ position: 'relative' }} ref={menuOpen ? menuRef : null}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#F4EFE6', borderRadius: 4, padding: '3px 8px', fontSize: 12, color: '#57534E' }}>
+                <span>{cat.name}</span>
+                {visibleGroups.length > 0 && (
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      onClick={() => setMenuOpen(o => !o)}
+                      title="Move to group"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', color: '#A8A29E', fontSize: 11, fontFamily: 'inherit', lineHeight: 1 }}
+                    >
+                      ⋯
+                    </button>
+                    {menuOpen && (
+                      <div style={{ position: 'absolute', bottom: '100%', left: 0, zIndex: 50, background: 'white', border: '1px solid #E7DFD0', borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.08)', minWidth: 160, padding: '4px 0' }}>
+                        <div style={{ fontSize: 10, color: '#A8A29E', padding: '4px 12px 2px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Move to</div>
+                        {visibleGroups.map((g) => (
+                          <button
+                            key={g.id}
+                            onClick={() => { moveCategory.mutate({ catId: cat.id, groupId: g.id }); setMenuOpen(false); }}
+                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 12px', fontSize: 13, color: '#1C1917', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
+                            onMouseEnter={e => (e.currentTarget.style.background = '#F4EFE6')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                          >
+                            {g.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <button
+        onClick={() => unhide.mutate()}
+        disabled={unhide.isPending}
+        style={{ fontSize: 11, color: '#365142', background: 'none', border: '1px solid #365142', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}
+      >
+        Restore group
+      </button>
+    </div>
+  );
+}
+
 // ─── BudgetPage ───────────────────────────────────────────────────────────────
 
 export function BudgetPage() {
@@ -917,6 +1003,11 @@ export function BudgetPage() {
   const queryError = budgetResults.find((r) => r.error)?.error;
   const ready = primaryData?.readyToAssignCents ?? 0;
   const gridCols = gridTemplate(numMonths, categoryColumnWidth(primaryData));
+
+  const { data: hiddenGroups = [] } = useQuery<HiddenGroup[]>({
+    queryKey: ['categories', 'hidden'],
+    queryFn: fetchHiddenGroups,
+  });
 
   const overspentCategories = (primaryData?.groups ?? [])
     .filter((g) => g.isIncome === false)
@@ -1085,6 +1176,18 @@ export function BudgetPage() {
           </div>
         );
       })}
+
+      {/* Hidden groups */}
+      {hiddenGroups.length > 0 && (
+        <div style={{ marginTop: 24, borderTop: '1px solid #E7DFD0', paddingTop: 16 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#A8A29E', marginBottom: 8 }}>
+            Hidden Groups
+          </div>
+          {hiddenGroups.map((g) => (
+            <HiddenGroupRow key={g.id} group={g} visibleGroups={primaryData?.groups ?? []} />
+          ))}
+        </div>
+      )}
 
       {/* Add group */}
       <div style={{ marginTop: 8 }}>

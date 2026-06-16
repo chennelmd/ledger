@@ -6,6 +6,27 @@ import { NewCategoryGroupSchema, NewCategorySchema } from '../../shared/schemas.
 
 export const categoriesRouter = new Hono();
 
+// GET /api/categories/hidden — hidden groups with their categories
+categoriesRouter.get('/hidden', async (c) => {
+  const groups = await db
+    .select()
+    .from(schema.categoryGroups)
+    .where(eq(schema.categoryGroups.isHidden, true))
+    .orderBy(schema.categoryGroups.sortOrder);
+
+  const cats = await db
+    .select()
+    .from(schema.categories)
+    .orderBy(schema.categories.sortOrder);
+
+  const result = groups.map((g) => ({
+    ...g,
+    categories: cats.filter((cat) => cat.groupId === g.id),
+  }));
+
+  return c.json(result);
+});
+
 // GET /api/categories — all groups with their categories nested
 categoriesRouter.get('/', async (c) => {
   const groups = await db
