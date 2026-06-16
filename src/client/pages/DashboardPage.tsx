@@ -374,6 +374,7 @@ function MoneyFlowSankey({ txs, accounts, width = 500 }: { txs: Transaction[]; a
         data={{ nodes, links }}
         nodePadding={16}
         nodeWidth={12}
+        margin={{ left: 100, right: 100, top: 4, bottom: 4 }}
         link={{ stroke: '#E7DFD0', strokeOpacity: 0.6 }}
         node={({ x, y, width, height, index, payload }: any) => {
           const color = index === 0
