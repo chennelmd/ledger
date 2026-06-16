@@ -7,7 +7,7 @@ import { X } from 'lucide-react';
 const SUBTYPES = {
   asset:     ['checking', 'savings', 'cash', 'investment'],
   liability: ['credit_card', 'heloc', 'mortgage', 'student_loan', 'tax_debt', 'auto_loan', 'personal_loan', 'retirement_loan'],
-  tracking:  ['home_value', 'car_value', 'other_asset'],
+  tracking:  ['home_value', 'car_value', 'mortgage', 'loan', 'other_asset'],
 } as const;
 
 const SUBTYPE_LABEL: Record<string, string> = {
@@ -16,6 +16,7 @@ const SUBTYPE_LABEL: Record<string, string> = {
   student_loan: 'Student Loan', tax_debt: 'Tax Debt', auto_loan: 'Auto Loan',
   personal_loan: 'Personal Loan', retirement_loan: 'Retirement Loan',
   home_value: 'Home Value', car_value: 'Car Value', other_asset: 'Other Asset',
+  loan: 'Loan',
 };
 
 type AccountType = keyof typeof SUBTYPES;
