@@ -29,7 +29,7 @@ Open `http://localhost:5173` — you should see "The Ledger".
 ```
 src/
 ├── server/             # Hono routes, business logic
-│   ├── index.ts        # Entry point
+│   ├── index.ts        # Entry point — API routes registered before serveStatic
 │   └── routes/         # One file per resource
 │       ├── accounts.ts
 │       ├── budget.ts
@@ -71,6 +71,14 @@ src/
 | `npm run build` | Production build |
 | `npm start` | Run production server |
 
+## Deployment (VM)
+
+```bash
+git pull && docker compose down && docker compose up -d --build
+```
+
+The `--build` flag rebuilds the image from the latest source on every deploy.
+
 ---
 
 ## Feature overview
@@ -89,10 +97,21 @@ Three views:
 
 Color coding: **green** = healthy; **amber** = positive but trending down vs. last month; **red** = negative.
 
-The right-side breakdown shows:
+The unassigned cash tooltip shows:
 - **Cash Accounts** — total across checking / savings / cash subtypes
-- **Reserved for Budget** — money locked in non-zero expense envelopes
-- **Scheduled Transactions** — upcoming bills not yet covered by envelopes (within 30-day window)
+- **Reserved for Budget** — money locked in budget envelopes (includes debt payment amounts not yet transferred)
+- **Scheduled – Unbudgeted** — upcoming bills within the 30-day window not covered by an envelope
+
+**Summary cards**:
+- **Cash** — total in on-budget asset accounts
+- **Reserved** — total of all positive envelope balances plus unfunded debt payments. Hover for a per-envelope breakdown.
+- **Net Worth** — sum of all account balances (asset + tracking + liability). Hover for a breakdown by account type.
+
+**Income vs. Expenses (IN / OUT)**:
+- **IN** — positive transactions in asset accounts, excluding asset-to-asset transfers (e.g., moving money between checking accounts)
+- **OUT** — all categorized spending using the split amount where applicable, so split transactions count only their categorized portion
+
+**Money Flow Sankey** — visualizes income flowing into each category group. Uses the same transfer-exclusion logic as the IN card.
 
 ---
 
@@ -122,7 +141,7 @@ The card shows:
 
 **Setting a promotional rate**: Go to **Accounts** → Add or Edit a liability → change **Rate Type** to "Promotional" → fill in Promo APR, Standard APR, and Promo End Date.
 
-**Debt categories**: Each liability account gets an automatically created "Bank Card Debt – [Name]" category in a "Debt Payments" group. These categories are hidden from the Budget page to keep it uncluttered — they live on the Debt page where you set the monthly payment amount directly on the card.
+**Debt categories**: Each on-budget liability account gets an automatically created "Bank Card Debt – [Name]" category in a "Debt Payments" group. These categories are hidden from the Budget page to keep it uncluttered — they live on the Debt page where you set the monthly payment amount directly on the card.
 
 ---
 
@@ -130,14 +149,33 @@ The card shows:
 
 Lists all accounts (asset, liability, tracking) with live balances. Clicking an account navigates to its ledger.
 
+**Account types**:
+
+| Type | On budget? | Use for |
+|---|---|---|
+| **Asset** | Yes | Checking, savings, cash — money you have |
+| **Liability** | Yes | Credit cards, loans where you track payments via debt categories |
+| **Tracking** | No | Off-budget accounts: home value, car value, mortgage balance, investment accounts |
+
 **Adding a liability account**:
 1. Click **+ Add Account**
 2. Set Type → Liability
 3. Fill in Subtype (credit card, mortgage, student loan, etc.)
-4. Enter Starting Balance (the amount you currently owe — entered as a positive number)
+4. Enter Starting Balance (the amount you currently owe — entered as a positive number, stored as negative)
 5. Optionally fill in **Debt Details**: rate type, APR, credit limit, min payment, statement day, due day
 
 A "Bank Card Debt" budget category is auto-created and linked to the account.
+
+**Adding a tracking account for a mortgage or loan**:
+1. Click **+ Add Account**
+2. Set Type → Tracking
+3. Set Subtype → Mortgage or Loan
+4. Enter the current balance as a positive number — it is automatically stored as negative (money owed)
+
+Tracking mortgage/loan accounts appear in net worth as a negative (reducing total net worth). The actual mortgage *payment* is handled as a regular budget expense category, not a debt payment category.
+
+**Hiding and restoring categories**:
+Hidden or deleted budget categories appear in a section at the bottom of the Budget page. From there you can restore a category to its group or move it to a different group.
 
 ---
 
@@ -145,10 +183,12 @@ A "Bank Card Debt" budget category is auto-created and linked to the account.
 
 Envelope-style budget with month navigation. Each category shows:
 - **Assigned** — money you've allocated to this envelope this month
-- **Activity** — spending against this category
-- **Available** — running balance (carries over or resets depending on category settings)
+- **Activity** — spending against this category (categorized transactions only; uncategorized splits are excluded)
+- **Available** — running balance (carries over month-to-month, or resets to zero on overspend depending on category settings)
 
-**Ready to Assign** (top right) = total on-budget asset balances − total non-zero envelope balances. Debt categories are excluded from the budget page — manage debt payments on the Debt page.
+**Ready to Assign** (top right) = total on-budget asset balances − total non-zero expense envelope balances. Debt categories are excluded — manage debt payments on the Debt page.
+
+**Moving categories**: Hover a category name and click the ⋯ button to move it to a different group.
 
 ---
 
@@ -179,9 +219,19 @@ Accessible per-account from the Accounts page. Enter your statement balance → 
 
 **Liability accounts and RTA**: Liability account balances are excluded from the Ready to Assign calculation. Only asset (checking, savings, cash, investment) balances count as "money you have." Debt is tracked separately on the Debt page.
 
-**Debt categories off the Budget page**: Debt payment categories are automatically created but filtered out of the Budget view. This keeps the budget focused on spending decisions. The Debt page is the single place to view and adjust debt payment amounts.
+**Mortgage as a tracking account**: A mortgage should be set up as a *tracking* (off-budget) account with the Mortgage subtype — not a liability. This keeps the mortgage balance visible in net worth without polluting the budget with a debt category. The monthly mortgage payment is a normal budget expense category (e.g., "Mortgage" under Household Expenses).
+
+**Debt categories off the Budget page**: Debt payment categories for on-budget liabilities (credit cards) are automatically created but filtered out of the Budget view. This keeps the budget focused on spending decisions. The Debt page is the single place to view and adjust debt payment amounts.
+
+**Reserved includes unfunded debt payments**: The Reserved figure on the Dashboard combines regular envelope balances with any debt payment amounts assigned this month that haven't been transferred yet. Once a payment posts, the cash balance already reflects it, so it leaves the "unfunded" bucket automatically.
+
+**Transfer filtering by account ID**: The IN card and Sankey chart exclude asset-to-asset transfers by matching `transferAccountId` against the set of asset account IDs. This is more reliable than matching by account name.
+
+**Split transaction activity**: Budget activity uses `splitAmountCents` when available, falling back to `amountCents`. Uncategorized splits (no `categoryId` and no linked debt account) are excluded from activity entirely, so they don't distort envelope balances.
 
 **Starting balances for liabilities**: When a liability account is created with a non-zero starting balance, the server creates a categorized transaction against the account's debt category (rather than storing the balance directly on the account). This ensures the debt is properly reflected in category activity.
+
+**API route ordering**: In `src/server/index.ts`, all `/api/*` routes must be registered *before* the `serveStatic('/*')` middleware. If static serving is registered first, it intercepts API requests in production and returns the index HTML instead of JSON.
 
 **APR storage**: APR values are stored as decimal fractions (e.g., `0.2499` = 24.99%). Multiply by 100 for display; use as-is in interest math (`balance × apr / 12`).
 
