@@ -533,7 +533,38 @@ export function DashboardPage() {
       {/* Summary cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, marginBottom: 28 }}>
         <SummaryCard label="Cash" value={fmt$(data.cashBalanceCents)} sub="total in accounts" />
-        <SummaryCard label="Reserved" value={fmt$(data.reservedEnvelopeCents)} sub="budgeted to envelopes" />
+        <SummaryCard
+          label="Reserved"
+          value={fmt$(data.reservedEnvelopeCents)}
+          sub="budgeted to envelopes"
+          tooltip={
+            <div style={{ fontSize: 12, lineHeight: 1.7 }}>
+              <div style={{ color: '#A8A29E', marginBottom: 4 }}>Envelope balances</div>
+              {data.reservedCategories.slice(0, 8).map(c => (
+                <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
+                  <span style={{ color: '#A8A29E' }}>{c.name}</span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt$(c.availableCents)}</span>
+                </div>
+              ))}
+              {data.reservedCategories.length > 8 && (
+                <div style={{ color: '#A8A29E', fontSize: 11 }}>+{data.reservedCategories.length - 8} more</div>
+              )}
+              {data.debtPaymentCents > 0 && (
+                <>
+                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', margin: '6px 0' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
+                    <span style={{ color: '#A8A29E' }}>Debt payments (unfunded)</span>
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt$(data.debtPaymentCents)}</span>
+                  </div>
+                </>
+              )}
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.2)', marginTop: 6, paddingTop: 6, display: 'flex', justifyContent: 'space-between', gap: 24, fontWeight: 500 }}>
+                <span style={{ color: '#A8A29E' }}>Total reserved</span>
+                <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt$(data.reservedEnvelopeCents)}</span>
+              </div>
+            </div>
+          }
+        />
         <SummaryCard label="Net worth" value={fmt$(netWorth)} sub="across all accounts" tooltip={netWorthTooltip} />
       </div>
 
