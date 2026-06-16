@@ -6,25 +6,36 @@ import { NewCategoryGroupSchema, NewCategorySchema } from '../../shared/schemas.
 
 export const categoriesRouter = new Hono();
 
-// GET /api/categories/hidden — hidden or soft-deleted groups with their categories
+// GET /api/categories/hidden — hidden/deleted groups AND hidden/deleted categories in visible groups
 categoriesRouter.get('/hidden', async (c) => {
-  const groups = await db
-    .select()
-    .from(schema.categoryGroups)
-    .where(or(eq(schema.categoryGroups.isHidden, true), isNotNull(schema.categoryGroups.deletedAt)))
-    .orderBy(schema.categoryGroups.sortOrder);
+  const [allGroups, allCats] = await Promise.all([
+    db.select().from(schema.categoryGroups).orderBy(schema.categoryGroups.sortOrder),
+    db.select().from(schema.categories).orderBy(schema.categories.sortOrder),
+  ]);
 
-  const cats = await db
-    .select()
-    .from(schema.categories)
-    .orderBy(schema.categories.sortOrder);
+  const hiddenGroupIds = new Set(
+    allGroups
+      .filter(g => g.isHidden || g.deletedAt)
+      .map(g => g.id)
+  );
 
-  const result = groups.map((g) => ({
+  // Groups: hidden or deleted
+  const hiddenGroups = allGroups
+    .filter(g => g.isHidden || g.deletedAt)
+    .map(g => ({ ...g, categories: allCats.filter(c => c.groupId === g.id) }));
+
+  // Orphaned categories: hidden or deleted, but in a visible group
+  const orphanedCats = allCats.filter(c => (c.isHidden || c.deletedAt) && !hiddenGroupIds.has(c.groupId));
+  const orphanGroups = allGroups.filter(g => orphanedCats.some(c => c.groupId === g.id));
+  const orphanResult = orphanGroups.map(g => ({
     ...g,
-    categories: cats.filter((cat) => cat.groupId === g.id),
+    isHidden: false,
+    deletedAt: null,
+    _orphanedCatsOnly: true,
+    categories: orphanedCats.filter(c => c.groupId === g.id),
   }));
 
-  return c.json(result);
+  return c.json([...hiddenGroups, ...orphanResult]);
 });
 
 // GET /api/categories — all groups with their categories nested
@@ -121,6 +132,20 @@ categoriesRouter.patch('/:id', async (c) => {
   const updated = await db
     .update(schema.categories)
     .set({ ...parsed.data, updatedAt: new Date().toISOString() })
+    .where(eq(schema.categories.id, id))
+    .returning()
+    .get();
+
+  if (!updated) return c.json({ error: 'not found' }, 404);
+  return c.json(updated);
+});
+
+// POST /api/categories/:id/restore — unhide and undelete a category
+categoriesRouter.post('/:id/restore', async (c) => {
+  const id = c.req.param('id');
+  const updated = await db
+    .update(schema.categories)
+    .set({ isHidden: false, deletedAt: null, updatedAt: new Date().toISOString() })
     .where(eq(schema.categories.id, id))
     .returning()
     .get();

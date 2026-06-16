@@ -62,7 +62,7 @@ function currentMonth() {
 
 // ─── api ─────────────────────────────────────────────────────────────────────
 
-interface HiddenGroup { id: string; name: string; categories: { id: string; name: string }[] }
+interface HiddenGroup { id: string; name: string; isHidden: boolean; deletedAt: string | null; _orphanedCatsOnly?: boolean; categories: { id: string; name: string }[] }
 
 async function fetchHiddenGroups(): Promise<HiddenGroup[]> {
   const res = await fetch('/api/categories/hidden');
@@ -895,19 +895,28 @@ function CategoryRow({ cat, group, months, getCatMonth, gridCols, groups }: {
 
 // ─── HiddenGroupRow ───────────────────────────────────────────────────────────
 
-function HiddenGroupRow({ group, visibleGroups }: { group: HiddenGroup; visibleGroups: BudgetGroup[] }) {
+function HiddenCategoryChip({ cat, visibleGroups }: { cat: { id: string; name: string }; visibleGroups: BudgetGroup[] }) {
   const qc = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const unhide = useMutation({
-    mutationFn: () => fetch(`/api/categories/groups/${group.id}/restore`, { method: 'POST' }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); qc.invalidateQueries({ queryKey: ['categories'] }); qc.invalidateQueries({ queryKey: ['categories', 'hidden'] }); },
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['budget'] });
+    qc.invalidateQueries({ queryKey: ['categories'] });
+    qc.invalidateQueries({ queryKey: ['categories', 'hidden'] });
+  };
+
+  const restore = useMutation({
+    mutationFn: () => fetch(`/api/categories/${cat.id}/restore`, { method: 'POST' }).then(r => r.json()),
+    onSuccess: invalidate,
   });
 
-  const moveCategory = useMutation({
-    mutationFn: ({ catId, groupId }: { catId: string; groupId: string }) => patchCategory(catId, { groupId }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); qc.invalidateQueries({ queryKey: ['categories'] }); qc.invalidateQueries({ queryKey: ['categories', 'hidden'] }); },
+  const move = useMutation({
+    mutationFn: async (groupId: string) => {
+      await fetch(`/api/categories/${cat.id}/restore`, { method: 'POST' });
+      return patchCategory(cat.id, { groupId });
+    },
+    onSuccess: invalidate,
   });
 
   useEffect(() => {
@@ -920,53 +929,75 @@ function HiddenGroupRow({ group, visibleGroups }: { group: HiddenGroup; visibleG
   }, [menuOpen]);
 
   return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#F4EFE6', borderRadius: 4, padding: '3px 8px', fontSize: 12, color: '#57534E', position: 'relative' }}>
+      <span>{cat.name}</span>
+      <div ref={menuRef} style={{ position: 'relative' }}>
+        <button
+          onClick={() => setMenuOpen(o => !o)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', color: '#A8A29E', fontSize: 11, fontFamily: 'inherit', lineHeight: 1 }}
+        >⋯</button>
+        {menuOpen && (
+          <div style={{ position: 'absolute', bottom: '100%', left: 0, zIndex: 50, background: 'white', border: '1px solid #E7DFD0', borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.08)', minWidth: 160, padding: '4px 0' }}>
+            <button
+              onClick={() => { restore.mutate(); setMenuOpen(false); }}
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 12px', fontSize: 13, color: '#365142', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#F4EFE6')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+            >Restore here</button>
+            {visibleGroups.length > 0 && (
+              <>
+                <div style={{ fontSize: 10, color: '#A8A29E', padding: '4px 12px 2px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Move to</div>
+                {visibleGroups.map(g => (
+                  <button
+                    key={g.id}
+                    onClick={() => { move.mutate(g.id); setMenuOpen(false); }}
+                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 12px', fontSize: 13, color: '#1C1917', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = '#F4EFE6')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                  >{g.name}</button>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HiddenGroupRow({ group, visibleGroups }: { group: HiddenGroup; visibleGroups: BudgetGroup[] }) {
+  const qc = useQueryClient();
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['budget'] });
+    qc.invalidateQueries({ queryKey: ['categories'] });
+    qc.invalidateQueries({ queryKey: ['categories', 'hidden'] });
+  };
+
+  const unhide = useMutation({
+    mutationFn: () => fetch(`/api/categories/groups/${group.id}/restore`, { method: 'POST' }).then(r => r.json()),
+    onSuccess: invalidate,
+  });
+
+  return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '8px 0', borderBottom: '1px solid #F0EADD' }}>
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: '#78716C', marginBottom: 4 }}>{group.name}</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {group.categories.map((cat) => (
-            <div key={cat.id} style={{ position: 'relative' }} ref={menuOpen ? menuRef : null}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#F4EFE6', borderRadius: 4, padding: '3px 8px', fontSize: 12, color: '#57534E' }}>
-                <span>{cat.name}</span>
-                {visibleGroups.length > 0 && (
-                  <div style={{ position: 'relative' }}>
-                    <button
-                      onClick={() => setMenuOpen(o => !o)}
-                      title="Move to group"
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', color: '#A8A29E', fontSize: 11, fontFamily: 'inherit', lineHeight: 1 }}
-                    >
-                      ⋯
-                    </button>
-                    {menuOpen && (
-                      <div style={{ position: 'absolute', bottom: '100%', left: 0, zIndex: 50, background: 'white', border: '1px solid #E7DFD0', borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.08)', minWidth: 160, padding: '4px 0' }}>
-                        <div style={{ fontSize: 10, color: '#A8A29E', padding: '4px 12px 2px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Move to</div>
-                        {visibleGroups.map((g) => (
-                          <button
-                            key={g.id}
-                            onClick={() => { moveCategory.mutate({ catId: cat.id, groupId: g.id }); setMenuOpen(false); }}
-                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 12px', fontSize: 13, color: '#1C1917', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
-                            onMouseEnter={e => (e.currentTarget.style.background = '#F4EFE6')}
-                            onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                          >
-                            {g.name}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
+          {group.categories.map(cat => (
+            <HiddenCategoryChip key={cat.id} cat={cat} visibleGroups={group._orphanedCatsOnly ? visibleGroups : [...visibleGroups, { id: group.id, name: group.name, isIncome: false, categories: [] }]} />
           ))}
         </div>
       </div>
-      <button
-        onClick={() => unhide.mutate()}
-        disabled={unhide.isPending}
-        style={{ fontSize: 11, color: '#365142', background: 'none', border: '1px solid #365142', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}
-      >
-        Restore group
-      </button>
+      {!group._orphanedCatsOnly && (
+        <button
+          onClick={() => unhide.mutate()}
+          disabled={unhide.isPending}
+          style={{ fontSize: 11, color: '#365142', background: 'none', border: '1px solid #365142', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}
+        >
+          Restore group
+        </button>
+      )}
     </div>
   );
 }
