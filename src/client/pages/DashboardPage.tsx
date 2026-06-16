@@ -30,6 +30,7 @@ type Transaction = {
   accountName: string | null;
   transferAccountName: string | null;
   transferId: string | null;
+  splitAmountCents: number | null;
 };
 
 type Schedule = {
@@ -188,19 +189,25 @@ function SummaryCard({ label, value, sub, tooltip }: { label: string; value: str
 // ── Report: Income vs Expenses ────────────────────────────────────────────────
 
 function IncomeVsExpenses({ txs, accounts }: { txs: Transaction[]; accounts: AccountWithBalance[] }) {
-  // Asset account names — transfers between these are pure moves (checking↔savings), not income/spending
+  // Asset account names — used to filter income (exclude asset-to-asset incoming transfers)
   const assetNames = new Set(accounts.filter(a => a.type === 'asset').map(a => a.name));
-  const isAssetTransfer = (t: Transaction) => !!(t.transferAccountName && assetNames.has(t.transferAccountName));
 
-  // Deduplicate: split transactions produce one row per split, all with the same amountCents
+  // Income: positive amounts into asset accounts, excluding transfers from other asset accounts
   const unique = Array.from(new Map(txs.map(t => [t.id, t])).values());
-  const assetTxs = unique.filter(t => t.accountType === 'asset');
-  // Income: positive deposits into asset accounts, excluding asset-to-asset transfers
-  const income   = assetTxs.filter(t => t.amountCents > 0 && !isAssetTransfer(t)).reduce((s, t) => s + t.amountCents, 0);
-  // Out: negative from asset accounts, excluding asset-to-asset transfers.
-  // Debt payments (checking→credit card) are included because the target is a liability, not an asset.
-  const expenses = assetTxs.filter(t => t.amountCents < 0 && !isAssetTransfer(t)).reduce((s, t) => s + Math.abs(t.amountCents), 0);
-  const net      = income - expenses;
+  const income = unique
+    .filter(t => t.accountType === 'asset' && t.amountCents > 0 && !(t.transferAccountName && assetNames.has(t.transferAccountName)))
+    .reduce((s, t) => s + t.amountCents, 0);
+
+  // Out: ALL categorized spending by split amount, across all account types.
+  // Using budget categories as the source of truth means:
+  //   - credit card purchases (categorized) are counted
+  //   - debt payments with a category (Credit Card Debt, Loans) are counted
+  //   - pure transfers with no category (Apple Card payoff from checking) are excluded
+  const expenses = txs
+    .filter(t => t.amountCents < 0 && t.categoryName)
+    .reduce((s, t) => s + Math.abs(t.splitAmountCents ?? t.amountCents), 0);
+
+  const net = income - expenses;
 
   const barMax = Math.max(income, expenses, 1);
 
@@ -226,7 +233,7 @@ function IncomeVsExpenses({ txs, accounts }: { txs: Transaction[]; accounts: Acc
         {/* Expenses */}
         <Tooltip content={
           <div style={{ fontSize: 12, lineHeight: 1.7, maxWidth: 220 }}>
-            <div style={{ color: '#A8A29E', marginBottom: 4 }}>All spending from checking & savings — direct bills, debt payments, subscriptions. Excludes transfers between your own asset accounts (e.g. checking → savings).</div>
+            <div style={{ color: '#A8A29E', marginBottom: 4 }}>Total of all categorized spending across every account — credit card purchases, bills, debt payments. Pure transfers with no budget category (e.g. paying off Apple Card in full) are excluded.</div>
             <div style={{ fontVariantNumeric: 'tabular-nums', color: '#7A1F2B' }}>{fmt$(expenses)} this month</div>
           </div>
         }>
@@ -313,13 +320,15 @@ const SANKEY_COLORS = [
 ];
 
 function MoneyFlowSankey({ txs, width = 500 }: { txs: Transaction[]; width?: number }) {
-  const nonTransfer = txs.filter(t => !t.transferAccountName && !t.transferId);
-  const income = nonTransfer.filter(t => t.accountType === 'asset' && t.amountCents > 0).reduce((s, t) => s + t.amountCents, 0);
+  // Income: deduplicated positive asset transactions (no transfers)
+  const unique = Array.from(new Map(txs.map(t => [t.id, t])).values());
+  const income = unique.filter(t => t.accountType === 'asset' && t.amountCents > 0 && !t.transferId && !t.transferAccountName).reduce((s, t) => s + t.amountCents, 0);
 
+  // Group spending by category group using split amounts — same methodology as OUT
   const byGroup = new Map<string, number>();
-  nonTransfer.filter(t => (t.accountType === 'asset' || t.accountType === 'liability') && t.amountCents < 0 && t.categoryGroupName).forEach(t => {
+  txs.filter(t => t.amountCents < 0 && t.categoryGroupName).forEach(t => {
     const g = t.categoryGroupName!;
-    byGroup.set(g, (byGroup.get(g) ?? 0) + Math.abs(t.amountCents));
+    byGroup.set(g, (byGroup.get(g) ?? 0) + Math.abs(t.splitAmountCents ?? t.amountCents));
   });
 
   const totalExpenses = Array.from(byGroup.values()).reduce((s, v) => s + v, 0);
