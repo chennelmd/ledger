@@ -404,21 +404,33 @@ function EditableGroupName({ group }: { group: BudgetGroup }) {
 
 // ─── EditableCategoryName ─────────────────────────────────────────────────────
 
-function EditableCategoryName({ cat }: { cat: BudgetCategory }) {
+function EditableCategoryName({ cat, currentGroupId, groups }: { cat: BudgetCategory; currentGroupId: string; groups: BudgetGroup[] }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const mutation = useMutation({
-    mutationFn: (name: string) => patchCategory(cat.id, { name }),
+    mutationFn: (patch: Record<string, unknown>) => patchCategory(cat.id, patch),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); qc.invalidateQueries({ queryKey: ['categories'] }); },
   });
 
   function commit() {
     const v = draft.trim();
-    if (v && v !== cat.name) mutation.mutate(v);
+    if (v && v !== cat.name) mutation.mutate({ name: v });
     setEditing(false);
   }
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handler(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
 
   if (editing) {
     return (
@@ -430,9 +442,62 @@ function EditableCategoryName({ cat }: { cat: BudgetCategory }) {
       />
     );
   }
+
+  const otherGroups = groups.filter(g => g.id !== currentGroupId);
+
   return (
-    <div style={S.catName} onClick={() => { setDraft(cat.name); setEditing(true); }} title="Click to rename">
-      {cat.name}
+    <div
+      style={{ ...S.catName, display: 'flex', alignItems: 'center', gap: 4, position: 'relative' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <span onClick={() => { setDraft(cat.name); setEditing(true); }} title="Click to rename" style={{ cursor: 'text', flex: 1 }}>
+        {cat.name}
+      </span>
+      {otherGroups.length > 0 && (
+        <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
+          <button
+            onClick={() => setMenuOpen(o => !o)}
+            title="Move to group"
+            style={{
+              opacity: hovered || menuOpen ? 1 : 0,
+              transition: 'opacity 0.1s',
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: '2px 4px', borderRadius: 3, color: '#A8A29E',
+              fontSize: 11, fontFamily: 'inherit', lineHeight: 1,
+            }}
+          >
+            ⋯
+          </button>
+          {menuOpen && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, zIndex: 50,
+              background: 'white', border: '1px solid #E7DFD0', borderRadius: 6,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.08)', minWidth: 160, padding: '4px 0',
+            }}>
+              <div style={{ fontSize: 10, color: '#A8A29E', padding: '4px 12px 2px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                Move to
+              </div>
+              {otherGroups.map(g => (
+                <button
+                  key={g.id}
+                  onClick={() => { mutation.mutate({ groupId: g.id }); setMenuOpen(false); }}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left',
+                    padding: '6px 12px', fontSize: 13, color: '#1C1917',
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#F4EFE6')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                >
+                  {g.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -769,12 +834,13 @@ function GoalModal({ cat, onClose }: { cat: BudgetCategory; onClose: () => void 
 // ─── CategoryRow ──────────────────────────────────────────────────────────────
 // Owns its own goalOpen state so each row manages its modal independently.
 
-function CategoryRow({ cat, group, months, getCatMonth, gridCols }: {
+function CategoryRow({ cat, group, months, getCatMonth, gridCols, groups }: {
   cat: BudgetCategory;
   group: BudgetGroup;
   months: string[];
   getCatMonth: (catId: string, mi: number) => BudgetCategory | undefined;
   gridCols: string;
+  groups: BudgetGroup[];
 }) {
   const [goalOpen, setGoalOpen] = useState(false);
 
@@ -784,7 +850,7 @@ function CategoryRow({ cat, group, months, getCatMonth, gridCols }: {
         style={{ ...budgetGridStyle(gridCols), borderBottom: '1px solid #F0EADD', background: '#FBF8F1', alignItems: 'center', minHeight: 42 }}
         data-budget-grid-row
       >
-        <EditableCategoryName cat={cat} />
+        <EditableCategoryName cat={cat} currentGroupId={group.id} groups={groups} />
         {months.map((m, mi) => {
           const d      = getCatMonth(cat.id, mi);
           const avail  = d?.availableCents ?? 0;
@@ -986,6 +1052,7 @@ export function BudgetPage() {
                     months={months}
                     getCatMonth={getCatMonth}
                     gridCols={gridCols}
+                    groups={primaryData.groups}
                   />
                 ))}
 
