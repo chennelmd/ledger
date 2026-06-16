@@ -188,8 +188,7 @@ budgetRouter.get('/:month', async (c) => {
         }
 
         return { ...cat, assignedCents, activityCents, availableCents };
-      })
-      .filter((cat) => !cat.linkedDebtAccountId);
+      });
 
     return { ...g, categories: groupCats };
   });
